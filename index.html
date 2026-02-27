@@ -1,107 +1,303 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quiz Room Amiens | CRM Cloud</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body class="bg-[#f8fafc]">
+// ==========================================
+// 1. CONFIGURATION ET SÉCURITÉ
+// ==========================================
+const CONFIG = {
+    URL: 'https://sdtgzlrwsrmhsvoztdat.supabase.co',
+    ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k',
+    AUTH_PASS: "AMIENS2026"
+};
 
-    <nav class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-50">
-        <div class="max-w-[1800px] mx-auto flex flex-wrap items-center justify-between gap-4">
-            <div class="flex items-center gap-4">
-                <div class="bg-indigo-600 text-white p-2 rounded-xl font-bold shadow-lg shadow-indigo-100 text-sm">QR</div>
-                <h1 class="text-xl font-extrabold tracking-tight">Amiens <span class="text-indigo-600">Pipeline</span></h1>
-                <div class="flex bg-slate-100 p-1 rounded-lg ml-4 border border-slate-200">
-                    <button onclick="setView('kanban')" id="btn-kanban" class="view-btn active">Kanban</button>
-                    <button onclick="setView('list')" id="btn-list" class="view-btn">Liste</button>
+const _supabase = supabase.createClient(CONFIG.URL, CONFIG.ANON_KEY);
+
+// Verrouillage du site
+(function() {
+    let access = sessionStorage.getItem('qr_amiens_auth');
+    while (access !== 'ok') {
+        const mdp = prompt("Accès restreint - CRM Quiz Room Amiens :");
+        if (mdp === null) return; 
+        if (mdp === CONFIG.AUTH_PASS) {
+            sessionStorage.setItem('qr_amiens_auth', 'ok');
+            access = 'ok';
+        } else {
+            alert("Code incorrect.");
+        }
+    }
+})();
+
+let clients = [];
+let currentId = null;
+let currentView = 'kanban';
+
+// ==========================================
+// 2. GESTION DES VUES (Kanban / Liste)
+// ==========================================
+function setView(view) {
+    currentView = view;
+    document.getElementById('btn-kanban').classList.toggle('active', view === 'kanban');
+    document.getElementById('btn-list').classList.toggle('active', view === 'list');
+    
+    const main = document.getElementById('main-content');
+    if (view === 'list') {
+        main.className = "p-6 overflow-x-auto";
+        renderListView();
+    } else {
+        main.className = "p-6 kanban-view overflow-x-auto";
+        refreshUI();
+    }
+}
+
+// ==========================================
+// 3. IMPORTATION CSV (Spécifique à ton fichier)
+// ==========================================
+async function handleCSV(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = async function(e) {
+        const text = e.target.result;
+        const rows = text.split('\n').slice(1); 
+        
+        const toInsert = rows.map(row => {
+            // Regex pour capturer les colonnes même avec des virgules dans les guillemets
+            const cols = row.match(/(".*?"|[^",\r\n]+)(?=\s*,|\s*$|\r|\n)/g) || [];
+            if (cols.length < 5) return null;
+
+            const clean = (val) => val ? val.replace(/"/g, '').trim() : "";
+
+            // Mapping basé sur ton fichier : Entreprise(0), Contact(1), Email(2), Tel(3), DateE(5), DateR(7), Statut(10), Prix(11), Infos(13)
+            const rawStatus = clean(cols[10]);
+            let status = 'new';
+            if (rawStatus.includes('Attente')) status = 'progress';
+            if (rawStatus.includes('Annulé')) status = 'lost';
+
+            const formatDate = (d) => {
+                if (!d || d === "" || d === '""') return null;
+                const p = d.replace(/"/g, '').split('/');
+                return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : null;
+            };
+
+            return {
+                entreprise: clean(cols[0]) || "Inconnu",
+                contact: clean(cols[1]),
+                email: clean(cols[2]),
+                tel: clean(cols[3]),
+                prix: parseFloat(clean(cols[11]).replace('€', '').replace(/\s/g, '').replace(',', '.')) || 0,
+                status: status,
+                dateE: formatDate(cols[5]),
+                dateR: formatDate(cols[7]),
+                infos: clean(cols[13]),
+                nbRelances: 0,
+                dateC: new Date().toISOString().split('T')[0]
+            };
+        }).filter(x => x !== null);
+
+        const { error } = await _supabase.from('clients').insert(toInsert);
+        if (error) alert("Erreur : " + error.message);
+        else { alert(toInsert.length + " clients importés !"); loadData(); }
+    };
+    reader.readAsText(file);
+}
+
+// ==========================================
+// 4. LOGIQUE MÉTIER ET AFFICHAGE
+// ==========================================
+async function loadData() {
+    const { data, error } = await _supabase.from('clients').select('*').order('id', { ascending: false });
+    if (!error) {
+        clients = data || [];
+        currentView === 'kanban' ? refreshUI() : renderListView();
+    }
+}
+
+function refreshUI() {
+    if (currentView === 'list') return renderListView();
+    
+    const today = new Date().toISOString().split('T')[0];
+    const search = document.getElementById('searchBar').value.toLowerCase();
+
+    ['new', 'progress', 'urgent', 'won', 'lost'].forEach(status => {
+        const container = document.getElementById(status);
+        if (!container) return;
+        container.innerHTML = '';
+        
+        const filtered = clients.filter(c => {
+            const matchesSearch = c.entreprise.toLowerCase().includes(search) || (c.contact && c.contact.toLowerCase().includes(search));
+            return c.status === status && matchesSearch;
+        });
+
+        document.getElementById(`cnt-${status}`).innerText = filtered.length;
+
+        filtered.forEach(c => {
+            if (c.dateR && c.dateR <= today && (status === 'new' || status === 'progress')) {
+                updateStatus(c.id, 'urgent');
+            }
+
+            const card = document.createElement('div');
+            card.className = "card";
+            card.setAttribute('data-id', c.id);
+            card.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <span class="text-[9px] font-black text-slate-400 uppercase bg-slate-100 px-2 py-1 rounded">${c.entreprise}</span>
+                    <span class="text-sm font-black text-indigo-600">${c.prix}€</span>
                 </div>
-            </div>
-
-            <div class="flex items-center gap-3">
-                <input type="file" id="csvInput" accept=".csv" class="hidden" onchange="handleCSV(event)">
-                <button onclick="document.getElementById('csvInput').click()" class="text-slate-500 hover:bg-slate-100 px-3 py-2 rounded-lg text-xs font-bold border border-slate-200">
-                    <i class="fa-solid fa-file-import mr-2"></i>Import CSV
-                </button>
-                <button onclick="openAddModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-all">
-                    + Nouveau Devis
-                </button>
-            </div>
-        </div>
-    </nav>
-
-    <div class="bg-white border-b border-slate-200 px-6 py-4">
-        <div class="max-w-[1800px] mx-auto flex flex-wrap items-center gap-8">
-            <div class="flex-1 max-w-sm relative">
-                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
-                <input type="text" id="searchBar" oninput="refreshUI()" placeholder="Rechercher..." class="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-xl text-sm">
-            </div>
-            
-            <div class="flex gap-10 border-x px-10 border-slate-100">
-                <div class="text-center">
-                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">En cours</p>
-                    <p class="text-xl font-black text-indigo-600" id="statPending">0€</p>
+                <div class="text-sm font-bold text-slate-800 mt-2">${c.contact || 'N/C'}</div>
+                <div class="mt-4 flex items-center justify-between">
+                    <div class="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">R : ${c.nbRelances || 0}</div>
+                    <div class="text-[9px] font-bold ${c.dateR <= today && status !== 'won' ? 'text-rose-500 animate-pulse' : 'text-slate-400'}">
+                        <i class="fa-regular fa-clock mr-1"></i>${c.dateR || '--'}
+                    </div>
                 </div>
-                <div class="text-center">
-                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">CA Gagné</p>
-                    <p class="text-xl font-black text-emerald-600" id="statWon">0€</p>
+                <div class="actions">
+                    <button onclick="copyRelanceScript(${c.id}, event)" class="flex-1 bg-slate-800 text-white text-[9px] font-bold py-2 rounded-lg">SCRIPT</button>
+                    ${status === 'urgent' ? `<button onclick="doRelance(${c.id}, event)" class="flex-1 bg-indigo-600 text-white text-[9px] font-bold py-2 rounded-lg">RELANCÉ</button>` : ''}
                 </div>
-                <div class="text-center">
-                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Conversion</p>
-                    <p class="text-xl font-black text-slate-800" id="statConv">0%</p>
-                </div>
-            </div>
+            `;
+            card.onclick = () => openEditModal(c.id);
+            container.appendChild(card);
+        });
+    });
+    updateStats();
+}
 
-            <div class="flex items-center gap-4">
-                <input type="date" id="filterStart" onchange="refreshUI()" class="text-xs border rounded-md p-1 bg-slate-50 text-slate-600">
-                <span class="text-slate-300">→</span>
-                <input type="date" id="filterEnd" onchange="refreshUI()" class="text-xs border rounded-md p-1 bg-slate-50 text-slate-600">
-            </div>
-        </div>
-    </div>
+function renderListView() {
+    const main = document.getElementById('main-content');
+    const search = document.getElementById('searchBar').value.toLowerCase();
+    const filtered = clients.filter(c => c.entreprise.toLowerCase().includes(search));
+    
+    main.innerHTML = `
+        <table class="w-full text-left bg-white rounded-2xl overflow-hidden shadow-sm">
+            <thead class="bg-slate-50 text-[10px] uppercase font-bold text-slate-400">
+                <tr><th class="p-4">Entreprise</th><th>Contact</th><th>Prix</th><th>Date Évènement</th><th>Statut</th><th>Action</th></tr>
+            </thead>
+            <tbody class="text-sm">
+                ${filtered.map(c => `
+                    <tr class="border-t hover:bg-slate-50 cursor-pointer" onclick="openEditModal(${c.id})">
+                        <td class="p-4 font-bold">${c.entreprise}</td>
+                        <td>${c.contact || '--'}</td>
+                        <td class="font-bold text-indigo-600">${c.prix}€</td>
+                        <td>${c.dateE || '--'}</td>
+                        <td><span class="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-slate-100">${c.status}</span></td>
+                        <td><button onclick="copyRelanceScript(${c.id}, event)" class="p-2 text-slate-400 hover:text-indigo-600"><i class="fa-solid fa-copy"></i></button></td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>`;
+    updateStats();
+}
 
-    <main id="main-content" class="p-6 kanban-view overflow-x-auto">
-        <div class="flex gap-5 min-w-max h-full">
-            <div class="col-group"><div class="col-header">NOUVEAU <span class="cnt" id="cnt-new">0</span></div><div id="new" class="kanban-list" data-status="new"></div></div>
-            <div class="col-group"><div class="col-header">ATTENTE CONF. <span class="cnt" id="cnt-progress">0</span></div><div id="progress" class="kanban-list" data-status="progress"></div></div>
-            <div class="col-group bg-amber-50/50 border border-amber-100"><div class="col-header text-amber-600">🚨 À RELANCER <span class="cnt bg-amber-500" id="cnt-urgent">0</span></div><div id="urgent" class="kanban-list" data-status="urgent"></div></div>
-            <div class="col-group bg-emerald-50/50 border border-emerald-100"><div class="col-header text-emerald-600">🎯 GAGNÉ <span class="cnt bg-emerald-500" id="cnt-won">0</span></div><div id="won" class="kanban-list" data-status="won"></div></div>
-            <div class="col-group opacity-60 grayscale"><div class="col-header text-slate-400">ANNULÉ <span class="cnt" id="cnt-lost">0</span></div><div id="lost" class="kanban-list" data-status="lost"></div></div>
-        </div>
-    </main>
+// ==========================================
+// 5. ACTIONS CRUD
+// ==========================================
+async function saveClient() {
+    const data = {
+        entreprise: document.getElementById('f-entreprise').value,
+        contact: document.getElementById('f-contact').value,
+        email: document.getElementById('f-email').value,
+        tel: document.getElementById('f-tel').value,
+        prix: parseFloat(document.getElementById('f-prix').value) || 0,
+        dateE: document.getElementById('f-dateE').value || null,
+        dateR: document.getElementById('f-dateR').value || null,
+        nbRelances: parseInt(document.getElementById('f-nbRelances').value) || 0,
+        infos: document.getElementById('f-infos').value
+    };
 
-    <div id="modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[100] p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col scale-in overflow-hidden">
-            <div class="p-6 border-b flex justify-between items-center bg-slate-50">
-                <h2 class="text-xl font-bold text-slate-800">Dossier Client</h2>
-                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 transition-colors text-2xl">&times;</button>
-            </div>
-            <form id="clientForm" class="p-8 grid grid-cols-2 gap-5 overflow-y-auto max-h-[70vh]">
-                <div class="col-span-2"><label class="lbl">Entreprise</label><input type="text" id="f-entreprise" class="inp" required></div>
-                <div><label class="lbl">Contact</label><input type="text" id="f-contact" class="inp"></div>
-                <div><label class="lbl">Email</label><input type="email" id="f-email" class="inp"></div>
-                <div><label class="lbl">Téléphone</label><input type="text" id="f-tel" class="inp"></div>
-                <div><label class="lbl">Prix estimé (€)</label><input type="number" step="0.01" id="f-prix" class="inp"></div>
-                <div><label class="lbl">Date Événement</label><input type="date" id="f-dateE" class="inp"></div>
-                <div><label class="lbl">Date Prochaine Relance</label><input type="date" id="f-dateR" class="inp border-indigo-100 bg-indigo-50/20"></div>
-                <div><label class="lbl">Nombre de relances</label><input type="number" id="f-nbRelances" class="inp" value="0"></div>
-                <div class="col-span-2"><label class="lbl">Notes & Historique</label><textarea id="f-infos" rows="3" class="inp" placeholder="Détails du devis, appels passés..."></textarea></div>
-            </form>
-            <div class="p-6 border-t flex justify-between items-center bg-slate-50">
-                <button onclick="deleteClient()" class="text-rose-500 font-bold text-xs uppercase hover:underline">Supprimer</button>
-                <div class="flex gap-3">
-                    <button onclick="closeModal()" class="px-6 py-2 font-bold text-slate-500">Annuler</button>
-                    <button onclick="saveClient()" id="btnSave" class="bg-indigo-600 text-white px-8 py-2.5 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">Enregistrer</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    if (currentId) {
+        await _supabase.from('clients').update(data).eq('id', currentId);
+    } else {
+        data.status = 'new';
+        data.dateC = new Date().toISOString().split('T')[0];
+        await _supabase.from('clients').insert([data]);
+    }
+    closeModal();
+    loadData();
+}
 
-    <script src="script.js"></script>
-</body>
-</html>
+async function updateStatus(id, stat, e) {
+    if (e) e.stopPropagation();
+    await _supabase.from('clients').update({ status: stat }).eq('id', id);
+    loadData();
+}
+
+async function doRelance(id, e) {
+    if (e) e.stopPropagation();
+    const c = clients.find(x => x.id === id);
+    const n = (c.nbRelances || 0) + 1;
+    // Calcul de la prochaine date simplifiée (J+5)
+    let nextDate = new Date();
+    nextDate.setDate(nextDate.getDate() + 5);
+    
+    await _supabase.from('clients').update({ 
+        status: 'progress', 
+        nbRelances: n,
+        dateR: nextDate.toISOString().split('T')[0]
+    }).eq('id', id);
+    loadData();
+}
+
+async function deleteClient() {
+    if (confirm("Supprimer ce dossier ?")) {
+        await _supabase.from('clients').delete().eq('id', currentId);
+        closeModal();
+        loadData();
+    }
+}
+
+// ==========================================
+// 6. MODALES ET STATS
+// ==========================================
+function openEditModal(id) {
+    currentId = id;
+    const c = clients.find(x => x.id === id);
+    document.getElementById('f-entreprise').value = c.entreprise;
+    document.getElementById('f-contact').value = c.contact || '';
+    document.getElementById('f-email').value = c.email || '';
+    document.getElementById('f-tel').value = c.tel || '';
+    document.getElementById('f-prix').value = c.prix || 0;
+    document.getElementById('f-dateE').value = c.dateE || '';
+    document.getElementById('f-dateR').value = c.dateR || '';
+    document.getElementById('f-nbRelances').value = c.nbRelances || 0;
+    document.getElementById('f-infos').value = c.infos || '';
+    document.getElementById('modal').classList.remove('hidden');
+}
+
+function openAddModal() {
+    currentId = null;
+    document.getElementById('clientForm').reset();
+    document.getElementById('modal').classList.remove('hidden');
+}
+
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+function updateStats() {
+    let pending = 0, won = 0, cWon = 0, cLost = 0;
+    clients.forEach(c => {
+        const p = parseFloat(c.prix) || 0;
+        if (c.status === 'won') { won += p; cWon++; }
+        else if (c.status === 'lost') { cLost++; }
+        else { pending += p; }
+    });
+    document.getElementById('statPending').innerText = pending.toLocaleString() + "€";
+    document.getElementById('statWon').innerText = won.toLocaleString() + "€";
+    const total = cWon + cLost;
+    document.getElementById('statConv').innerText = total > 0 ? Math.round((cWon / total) * 100) + "%" : "0%";
+}
+
+function copyRelanceScript(id, e) {
+    e.stopPropagation();
+    const c = clients.find(x => x.id === id);
+    const texte = `Bonjour ${c.contact || c.entreprise},\n\nJe reviens vers vous concernant votre projet Quiz Room Amiens (${c.prix}€).\n\nAvez-vous pu en discuter ?\n\nÀ bientôt !`;
+    navigator.clipboard.writeText(texte).then(() => alert("Copié !"));
+}
+
+// Drag & Drop
+['new', 'progress', 'urgent', 'won', 'lost'].forEach(s => {
+    const el = document.getElementById(s);
+    if (el) {
+        new Sortable(el, { group: 'crm', animation: 150, onEnd: async (e) => {
+            const id = e.item.getAttribute('data-id');
+            await updateStatus(id, e.to.id);
+        }});
+    }
+});
+
+loadData();
