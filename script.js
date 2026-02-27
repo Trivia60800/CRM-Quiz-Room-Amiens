@@ -1,6 +1,4 @@
-// ==========================================
-// 1. CONFIGURATION ET SÉCURITÉ
-// ==========================================
+// CONFIGURATION
 const CONFIG = {
     URL: 'https://sdtgzlrwsrmhsvoztdat.supabase.co',
     ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k',
@@ -9,29 +7,19 @@ const CONFIG = {
 
 const _supabase = supabase.createClient(CONFIG.URL, CONFIG.ANON_KEY);
 
-// Verrouillage du site
+// AUTH SIMPLE
 (function() {
-    let access = sessionStorage.getItem('qr_amiens_auth');
-    while (access !== 'ok') {
-        const mdp = prompt("Accès restreint - CRM Quiz Room Amiens :");
-        if (mdp === null) return; 
-        if (mdp === CONFIG.AUTH_PASS) {
-            sessionStorage.setItem('qr_amiens_auth', 'ok');
-            access = 'ok';
-        } else {
-            alert("Code incorrect.");
-        }
+    if (sessionStorage.getItem('qr_amiens_auth') !== 'ok') {
+        const mdp = prompt("Accès restreint :");
+        if (mdp === CONFIG.AUTH_PASS) sessionStorage.setItem('qr_amiens_auth', 'ok');
+        else window.location.reload();
     }
 })();
 
 let clients = [];
 let currentId = null;
-let currentView = 'kanban';
 
-// ==========================================
-// 2. LOGIQUE DES DATES ET CALCULS
-// ==========================================
-
+// HELPERS DATES
 function addBusinessDays(date, days) {
     let result = new Date(date);
     let added = 0;
@@ -43,115 +31,80 @@ function addBusinessDays(date, days) {
 }
 
 function getNextRelanceDate(count) {
-    const steps = [3, 5, 10]; 
-    const days = steps[count] || 15; 
-    return addBusinessDays(new Date(), days);
+    const steps = [3, 5, 10];
+    return addBusinessDays(new Date(), steps[count] || 15);
 }
 
-function getDaysDiff(dateR) {
-    if (!dateR) return null;
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const target = new Date(dateR);
-    target.setHours(0,0,0,0);
-    const diffTime = target - today;
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-}
-
-// ==========================================
-// 3. ACTION DE RELANCE AVEC COMMENTAIRE
-// ==========================================
-
+// RELANCE AVEC NOTE
 async function doRelance(id, e) {
     if (e) e.stopPropagation();
     const c = clients.find(x => x.id === id);
     
-    // 1. Choisir le moyen de relance
-    const moyen = prompt("Moyen de relance :\n1: Mail\n2: Téléphone\n3: SMS\n4: Autre", "1");
+    const moyen = prompt("Moyen de relance :\n1: Mail, 2: Tel, 3: SMS, 4: Autre", "1");
     if (!moyen) return;
 
-    let texteMoyen = "";
-    switch(moyen) {
-        case "1": texteMoyen = "Mail"; break;
-        case "2": texteMoyen = "Tel"; break;
-        case "3": texteMoyen = "SMS"; break;
-        default: texteMoyen = "Autre";
-    }
-
-    // 2. Ajouter une note spécifique à cette relance
-    const noteRelance = prompt("Note sur cet échange (ex: 'A eu le boss au tel, attend validation budget') :");
+    const notesRelance = prompt("Note sur l'échange (optionnel) :");
+    const labels = {"1":"Mail","2":"Tel","3":"SMS","4":"Autre"};
     
-    // 3. Préparer les données
     const n = (c.nbRelances || 0) + 1;
-    const nextDate = getNextRelanceDate(n - 1);
-    const dateJour = new Date().toLocaleDateString('fr-FR', {day: '2-digit', month: '2-digit'});
+    const dateJ = new Date().toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit'});
+    let log = `[${dateJ}] Relance par ${labels[moyen] || 'Autre'}`;
+    if(notesRelance) log += ` : ${notesRelance}`;
     
-    // Formatage du message d'historique
-    let logMessage = `[${dateJour}] Relance par ${texteMoyen}`;
-    if (noteRelance && noteRelance.trim() !== "") {
-        logMessage += ` : ${noteRelance.trim()}`;
-    }
+    const nouvelleNote = `${log}\n${c.infos || ''}`;
 
-    // On ajoute la nouvelle info en haut des notes existantes
-    const nouvelleNote = `${logMessage}\n${c.infos || ''}`;
-
-    // 4. Mise à jour Supabase
-    const { error } = await _supabase.from('clients').update({ 
+    await _supabase.from('clients').update({ 
         status: 'progress', 
         nbRelances: n,
-        dateR: nextDate,
+        dateR: getNextRelanceDate(n-1),
         infos: nouvelleNote
     }).eq('id', id);
 
-    if (error) alert("Erreur : " + error.message);
-    else loadData();
+    loadData();
 }
 
-// ==========================================
-// 4. CHARGEMENT ET AFFICHAGE
-// ==========================================
-
+// CHARGEMENT
 async function loadData() {
-    const { data, error } = await _supabase.from('clients').select('*').order('id', { ascending: false });
-    if (!error) {
+    try {
+        const { data, error } = await _supabase.from('clients').select('*').order('id', { ascending: false });
+        if (error) throw error;
         clients = data || [];
         refreshUI();
+    } catch (e) {
+        console.error("Erreur Supabase :", e);
     }
 }
 
 function refreshUI() {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
     const search = document.getElementById('searchBar').value.toLowerCase();
 
-    ['new', 'progress', 'urgent', 'won', 'lost'].forEach(status => {
+    const sections = ['new', 'progress', 'urgent', 'won', 'lost'];
+    sections.forEach(status => {
         const container = document.getElementById(status);
         if (!container) return;
         container.innerHTML = '';
         
         const filtered = clients.filter(c => {
-            const matchesSearch = c.entreprise.toLowerCase().includes(search) || (c.contact && c.contact.toLowerCase().includes(search));
-            return c.status === status && matchesSearch;
+            const matches = c.entreprise.toLowerCase().includes(search) || (c.contact && c.contact.toLowerCase().includes(search));
+            // Logique visuelle : si c'est en retard, on l'affiche dans Urgent même si son statut BDD est 'new'
+            if (status === 'urgent') {
+                return matches && (c.status === 'urgent' || (c.dateR && c.dateR <= today && c.status !== 'won' && c.status !== 'lost'));
+            }
+            if (status === 'new' || status === 'progress') {
+                // On ne l'affiche ici que s'il n'est PAS en retard (sinon il est dans urgent)
+                return matches && c.status === status && (!c.dateR || c.dateR > today);
+            }
+            return matches && c.status === status;
         });
 
         document.getElementById(`cnt-${status}`).innerText = filtered.length;
 
         filtered.forEach(c => {
-            const diff = getDaysDiff(c.dateR);
+            const isOverdue = c.dateR && c.dateR <= today;
             
-            // Passage auto en Urgent si échéance passée
-            if (c.dateR && c.dateR <= todayStr && (status === 'new' || status === 'progress')) {
-                updateStatus(c.id, 'urgent');
-            }
-
-            let timeBadge = "";
-            if (c.dateR) {
-                if (diff < 0) timeBadge = `<span class="text-rose-600 font-bold">Retard ${Math.abs(diff)}j</span>`;
-                else if (diff === 0) timeBadge = `<span class="text-amber-600 font-bold animate-pulse">JOUR J</span>`;
-                else timeBadge = `<span class="text-slate-400">J-${diff}</span>`;
-            }
-
             const card = document.createElement('div');
-            card.className = "card";
+            card.className = `card ${isOverdue && c.status !== 'won' ? 'border-l-4 border-rose-500' : ''}`;
             card.setAttribute('data-id', c.id);
             card.innerHTML = `
                 <div class="flex justify-between items-start">
@@ -161,11 +114,13 @@ function refreshUI() {
                 <div class="text-sm font-bold text-slate-800 mt-2">${c.contact || 'N/C'}</div>
                 <div class="mt-4 flex items-center justify-between">
                     <div class="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">R : ${c.nbRelances || 0}</div>
-                    <div class="text-[9px] uppercase tracking-tighter">${timeBadge}</div>
+                    <div class="text-[9px] font-bold ${isOverdue ? 'text-rose-500 animate-pulse' : 'text-slate-400'}">
+                        ${isOverdue ? 'À RELANCER' : (c.dateR || '--')}
+                    </div>
                 </div>
                 <div class="actions">
-                    <button onclick="copyRelanceScript(${c.id}, event)" class="flex-1 bg-slate-800 text-white text-[9px] font-bold py-2 rounded-lg">SCRIPT</button>
-                    <button onclick="doRelance(${c.id}, event)" class="flex-1 bg-indigo-600 text-white text-[9px] font-bold py-2 rounded-lg">RELANCÉ</button>
+                    <button onclick="copyRelanceScript(${c.id}, event)" class="flex-1 bg-slate-800 text-white text-[9px] font-bold py-2 rounded-lg uppercase">Script</button>
+                    <button onclick="doRelance(${c.id}, event)" class="flex-1 bg-indigo-600 text-white text-[9px] font-bold py-2 rounded-lg uppercase">Relancé</button>
                 </div>
             `;
             card.onclick = () => openEditModal(c.id);
@@ -175,10 +130,7 @@ function refreshUI() {
     updateStats();
 }
 
-// ==========================================
-// 5. FONCTIONS CRUD
-// ==========================================
-
+// CRUD
 async function saveClient() {
     const data = {
         entreprise: document.getElementById('f-entreprise').value,
@@ -204,24 +156,12 @@ async function saveClient() {
     loadData();
 }
 
-async function updateStatus(id, stat, e) {
-    if (e) e.stopPropagation();
+async function updateStatus(id, stat) {
     await _supabase.from('clients').update({ status: stat }).eq('id', id);
     loadData();
 }
 
-async function deleteClient() {
-    if (confirm("Supprimer ce dossier ?")) {
-        await _supabase.from('clients').delete().eq('id', currentId);
-        closeModal();
-        loadData();
-    }
-}
-
-// ==========================================
-// 6. MODALES & STATS
-// ==========================================
-
+// AUTRES FONCTIONS (Modales, Stats, Sortable...)
 function openEditModal(id) {
     currentId = id;
     const c = clients.find(x => x.id === id);
@@ -237,12 +177,7 @@ function openEditModal(id) {
     document.getElementById('modal').classList.remove('hidden');
 }
 
-function openAddModal() {
-    currentId = null;
-    document.getElementById('clientForm').reset();
-    document.getElementById('modal').classList.remove('hidden');
-}
-
+function openAddModal() { currentId = null; document.getElementById('clientForm').reset(); document.getElementById('modal').classList.remove('hidden'); }
 function closeModal() { document.getElementById('modal').classList.add('hidden'); }
 
 function updateStats() {
@@ -256,17 +191,17 @@ function updateStats() {
     document.getElementById('statPending').innerText = pending.toLocaleString() + "€";
     document.getElementById('statWon').innerText = won.toLocaleString() + "€";
     const total = cWon + cLost;
-    document.getElementById('statConv').innerText = total > 0 ? Math.round((cWon / total) * 100) + "%" : "0%";
+    document.getElementById('statConv').innerText = total > 0 ? Math.round((cWon/total)*100) + "%" : "0%";
 }
 
 function copyRelanceScript(id, e) {
     e.stopPropagation();
     const c = clients.find(x => x.id === id);
     const texte = `Bonjour ${c.contact || c.entreprise},\n\nJe reviens vers vous concernant votre projet Quiz Room Amiens (${c.prix}€).\n\nAvez-vous pu en discuter ?\n\nÀ bientôt !`;
-    navigator.clipboard.writeText(texte).then(() => alert("Script copié !"));
+    navigator.clipboard.writeText(texte).then(() => alert("Copié !"));
 }
 
-// Drag & Drop
+// Drag and drop
 ['new', 'progress', 'urgent', 'won', 'lost'].forEach(s => {
     const el = document.getElementById(s);
     if (el) {
@@ -288,14 +223,22 @@ async function handleCSV(event) {
             const cols = row.match(/(".*?"|[^",\r\n]+)(?=\s*,|\s*$|\r|\n)/g) || [];
             if (cols.length < 5) return null;
             const clean = (v) => v ? v.replace(/"/g, '').trim() : "";
+            
+            const formatDate = (d) => {
+                if (!d || d === "" || d === '""') return null;
+                const p = d.split('/');
+                return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : null;
+            };
+
             return {
                 entreprise: clean(cols[0]),
                 contact: clean(cols[1]),
                 email: clean(cols[2]),
                 tel: clean(cols[3]),
                 prix: parseFloat(clean(cols[11]).replace('€','').replace(/\s/g,'').replace(',','.')) || 0,
-                status: 'new',
-                dateR: getNextRelanceDate(0),
+                status: clean(cols[10]).includes('Annulé') ? 'lost' : 'new',
+                dateE: formatDate(clean(cols[5])),
+                dateR: formatDate(clean(cols[7])),
                 infos: clean(cols[13]),
                 dateC: new Date().toISOString().split('T')[0]
             };
