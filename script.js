@@ -891,8 +891,54 @@ async function deleteClient() {
 }
 
 // ==========================================
-// IMPORT CSV - VERSION ROBUSTE (Virgules, Points-virgules, Espaces)
+// IMPORT CSV — VERSION ROBUSTE CORRIGÉE
 // ==========================================
+
+/**
+ * Parse une ligne CSV en tenant compte des guillemets (champs avec virgules/points-virgules)
+ * Gère les valeurs comme "636,50€" ou "Mail, Téléphone"
+ */
+function parseCSVLine(line, sep) {
+  const vals = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      // Guillemet double à l'intérieur d'un champ entre guillemets → on l'inclut
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === sep && !inQuotes) {
+      vals.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  vals.push(cur);
+  return vals;
+}
+
+/**
+ * Normalise un header CSV :
+ * - minuscules
+ * - supprime les accents
+ * - supprime les apostrophes (gère "Date de l'événement" → "date de levenement")
+ * - trim les espaces
+ */
+function normalizeHeader(h) {
+  return h
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')   // supprime les accents
+    .replace(/['''\u2018\u2019\u02bc]/g, ''); // supprime toutes les formes d'apostrophes
+}
+
 function handleCSV(event) {
   const file = event.target.files[0];
   event.target.value = '';
@@ -901,8 +947,8 @@ function handleCSV(event) {
   const reader = new FileReader();
   reader.onload = async (e) => {
     let raw = e.target.result;
-    
-    // Enlever le BOM UTF-8 si présent et nettoyer les lignes
+
+    // Enlever le BOM UTF-8 si présent et nettoyer
     raw = raw.replace(/^\uFEFF/, '').trim();
     const lines = raw.split(/\r?\n/).filter(l => l.trim());
 
@@ -914,80 +960,96 @@ function handleCSV(event) {
     // Détection automatique du séparateur (virgule ou point-virgule)
     const firstLine = lines[0];
     const sep = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
-    
-    // Nettoyage des headers (minuscules, sans accents)
-    const headers = firstLine.split(sep).map(h => 
-      h.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    );
+
+    // Normalisation des headers (minuscules, sans accents, sans apostrophes)
+    const rawHeaders = parseCSVLine(firstLine, sep);
+    const headers = rawHeaders.map(h => normalizeHeader(h));
+
+    console.log('[CSV Import] Séparateur détecté :', sep);
+    console.log('[CSV Import] Headers normalisés :', headers);
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
-      // Gestion des colonnes avec des guillemets (si présence de virgules dans le texte)
-      let vals = [];
-      if (sep === ',') {
-        const regex = /(".*?"|[^",\r\n]+)(?=\s*,|\s*$|\r|\n)/g;
-        vals = lines[i].match(regex) || [];
-      } else {
-        vals = lines[i].split(';');
-      }
-      
+      const vals = parseCSVLine(lines[i], sep);
+
       const row = {};
       headers.forEach((h, idx) => {
-        let v = vals[idx] ? vals[idx].trim().replace(/^"|"$/g, '') : '';
-        row[h] = v;
+        row[h] = (vals[idx] || '').trim();
       });
 
-      // Mapping basé sur ton fichier actuel (priorité aux noms de tes colonnes)
-      const entreprise = row['entreprise'] || row['nom de lentreprise'] || vals[0];
+      // Mapping des colonnes du fichier vers les champs Supabase
+      // On couvre plusieurs noms possibles pour chaque champ
+      const entreprise =
+        row['entreprise'] ||
+        row['nom de lentreprise'] ||
+        row['societe'] ||
+        vals[0] || '';
+
       if (!entreprise || entreprise.toLowerCase() === 'entreprise') continue;
+
+      // Nettoyage du prix : enlève €, espaces normaux et insécables (\u00a0), remplace , par .
+      const prixRaw = row['prix du devis'] || row['prix'] || '0';
+      const prix = parseFloat(
+        prixRaw
+          .replace(/[^\d.,]/g, '')   // garde uniquement chiffres, virgule, point
+          .replace(',', '.')          // virgule décimale → point
+      ) || 0;
+
+      // Détermination du statut
+      const statutRaw = (row['statut'] || '').toLowerCase();
+      let status = 'new';
+      if (statutRaw.includes('annul') || statutRaw.includes('perdu')) status = 'lost';
+      else if (statutRaw.includes('won') || statutRaw.includes('gagne') || statutRaw.includes('gagn')) status = 'won';
 
       const rowData = {
         entreprise: entreprise,
-        contact:    row['contact'] || row['nom du contact'] || '',
-        email:      row['email'] || '',
-        tel:        row['telephone'] || '',
-        // Nettoyage du prix (enlève €, les espaces normaux et les espaces insécables d'Excel)
-        prix:       parseFloat((row['prix du devis'] || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0,
-        status:     (row['statut'] && row['statut'].toLowerCase().includes('annul')) ? 'lost' : 'new',
-        dateE:      parseDate(row['date de levenement'] || row['datee']),
-        dateR:      parseDate(row['date de relance'] || row['dater']),
-        infos:      row['infos +'] || row['reponse relance'] || '',
+        contact:    row['contact']    || row['nom du contact'] || '',
+        email:      row['email']      || '',
+        tel:        row['telephone']  || row['tel'] || '',
+        prix:       prix,
+        status:     status,
+        dateE:      parseDate(row['date de levenement'] || row['date evenement'] || row['datee'] || ''),
+        dateR:      parseDate(row['date de relance']    || row['dater'] || ''),
+        infos:      row['infos +']    || row['infos']   || row['reponse relance'] || '',
         nbRelances: 0,
-        dateC:      new Date().toISOString().split('T')[0]
+        dateC:      TODAY
       };
 
       rows.push(rowData);
     }
 
+    console.log('[CSV Import] Lignes valides :', rows.length);
+
     if (rows.length === 0) {
-      toast('Aucune donnée valide trouvée', 'error');
+      toast('Aucune donnée valide trouvée dans le fichier', 'error');
       return;
     }
 
-    showImportLoader(`Import de ${rows.length} dossier(s)...`);
+    showImportLoader(`Import de ${rows.length} dossier(s)…`);
 
-    // Envoi à Supabase
     const { error } = await _sb.from('clients').insert(rows);
 
     hideImportLoader();
     if (error) {
-      console.error(error);
+      console.error('[CSV Import] Erreur Supabase :', error);
       toast('Erreur Supabase : ' + error.message, 'error');
     } else {
-      toast(`${rows.length} dossiers importés avec succès !`, 'success');
+      toast(`${rows.length} dossier${rows.length > 1 ? 's' : ''} importé${rows.length > 1 ? 's' : ''} avec succès !`, 'success');
       loadData();
     }
   };
   reader.readAsText(file, 'UTF-8');
 }
 
-// Fonction de parsing de date améliorée
+/**
+ * Parse une date depuis une chaîne :
+ * - Format ISO  : AAAA-MM-JJ
+ * - Format FR   : JJ/MM/AAAA ou JJ-MM-AAAA
+ */
 function parseDate(str) {
   if (!str) return null;
   str = str.trim();
-  // Format AAAA-MM-JJ (déjà bon)
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  // Format JJ/MM/AAAA (français)
   const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   return null;
