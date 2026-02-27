@@ -4,7 +4,7 @@
 const CONFIG = {
     URL: 'https://sdtgzlrwsrmhsvoztdat.supabase.co',
     ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k',
-    AUTH_PASS: "AMIENS2026"
+    AUTH_PASS: "QRAmiens"
 };
 
 const _supabase = supabase.createClient(CONFIG.URL, CONFIG.ANON_KEY);
