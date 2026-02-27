@@ -1,3 +1,21 @@
+// SYSTÈME DE SÉCURITÉ SIMPLE
+const PASSWORD = "QUIZ-AMIENS-2024"; // Tu peux changer ce mot de passe
+
+function checkAccess() {
+    const session = sessionStorage.getItem('crm_access');
+    if (session !== 'granted') {
+        const input = prompt("Veuillez saisir le mot de passe d'accès :");
+        if (input === PASSWORD) {
+            sessionStorage.setItem('crm_access', 'granted');
+        } else {
+            alert("Accès refusé !");
+            document.body.innerHTML = "<h1 style='padding:50px; text-align:center;'>Accès non autorisé.</h1>";
+        }
+    }
+}
+
+checkAccess(); // Se lance immédiatement au chargement
+
 // INITIALISATION SUPABASE
 const supabaseUrl = 'https://sdtgzlrwsrmhsvoztdat.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k';
