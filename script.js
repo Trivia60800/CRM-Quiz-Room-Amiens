@@ -263,9 +263,14 @@ function checkEventsPassed() {
 }
 
 async function quickClassify(id, status) {
-  const { error } = await _sb.from('clients').update({ status }).eq('id', id);
+  if (status === 'lost') {
+    openLostModal(id);
+    return;
+  }
+  // Gagné : effacer la date de relance
+  const { error } = await _sb.from('clients').update({ status, dateR: null }).eq('id', id);
   if (!error) {
-    toast(status === 'won' ? '🎉 Marqué comme gagné !' : 'Dossier classé comme perdu', status === 'won' ? 'success' : 'info');
+    toast('🎉 Marqué comme gagné !', 'success');
     loadData();
   } else {
     toast('Erreur mise à jour', 'error');
@@ -274,6 +279,51 @@ async function quickClassify(id, status) {
 
 function dismissBanner() {
   document.getElementById('classify-banner').style.display = 'none';
+}
+
+// ==========================================
+// MODALE RAISON DE PERTE
+// ==========================================
+let lostClientId = null;
+
+function openLostModal(id) {
+  lostClientId = id;
+  const c = clients.find(x => x.id === id);
+  document.getElementById('lost-modal-company').textContent = c ? c.entreprise : '';
+  document.getElementById('lost-reason').value = '';
+  document.getElementById('lost-modal').classList.add('open');
+}
+
+function closeLostModal() {
+  document.getElementById('lost-modal').classList.remove('open');
+  lostClientId = null;
+}
+
+async function confirmLost() {
+  if (!lostClientId) return;
+  const reason = document.getElementById('lost-reason').value.trim();
+  const c = clients.find(x => x.id === lostClientId);
+
+  // Ajouter la raison dans l'historique si fournie
+  let newInfos = c?.infos || '';
+  if (reason) {
+    const dateJour = new Date().toLocaleDateString('fr-FR');
+    newInfos = `[${dateJour}] Perdu — Raison : ${reason}\n` + newInfos;
+  }
+
+  const { error } = await _sb.from('clients').update({
+    status: 'lost',
+    dateR:  null,
+    infos:  newInfos
+  }).eq('id', lostClientId);
+
+  if (!error) {
+    toast('Dossier classé comme perdu', 'info');
+    closeLostModal();
+    loadData();
+  } else {
+    toast('Erreur mise à jour', 'error');
+  }
 }
 
 // ==========================================
@@ -577,10 +627,22 @@ function initSortable() {
 }
 
 async function moveCard(id, newStatus) {
-  const { error } = await _sb.from('clients').update({ status: newStatus }).eq('id', id);
+  // Si on dépose dans "perdu", ouvrir la modale de raison
+  if (newStatus === 'lost') {
+    openLostModal(id);
+    return; // moveCard sera rappelé depuis confirmLost()
+  }
+
+  const update = { status: newStatus };
+  // Gagné ou perdu → plus de relance
+  if (newStatus === 'won' || newStatus === 'lost') {
+    update.dateR = null;
+  }
+
+  const { error } = await _sb.from('clients').update(update).eq('id', id);
   if (!error) {
     const c = clients.find(x => x.id === id);
-    if (c) c.status = newStatus;
+    if (c) { c.status = newStatus; if (update.dateR === null) c.dateR = null; }
     const labels = { new: 'Nouveaux', progress: 'En cours', urgent: 'À relancer', won: 'Gagné', lost: 'Perdu' };
     toast(`Déplacé vers « ${labels[newStatus] || newStatus} »`, 'info');
     refreshUI();
@@ -773,27 +835,34 @@ async function saveClient() {
   const entreprise = document.getElementById('f-entreprise').value.trim();
   if (!entreprise) { toast('Le champ Entreprise est requis', 'error'); return; }
 
+  const status = document.getElementById('f-status').value;
   const data = {
     entreprise,
     contact:    document.getElementById('f-contact').value,
     email:      document.getElementById('f-email').value,
     tel:        document.getElementById('f-tel').value,
     prix:       parseFloat(document.getElementById('f-prix').value)     || 0,
-    status:     document.getElementById('f-status').value,
+    status,
     dateE:      document.getElementById('f-dateE').value                || null,
     dateR:      document.getElementById('f-dateR').value                || null,
     nbRelances: parseInt(document.getElementById('f-nbRelances').value) || 0,
     infos:      document.getElementById('f-infos').value
   };
 
+  // Gagné ou perdu → on efface la date de relance
+  if (status === 'won' || status === 'lost') {
+    data.dateR = null;
+  }
+
   let error;
   if (currentId) {
     ({ error } = await _sb.from('clients').update(data).eq('id', currentId));
   } else {
     data.dateC = TODAY;
-    // Calculer la première date de relance automatiquement
-    const firstRelance = computeNextRelance({ ...data, nbRelances: 0 });
-    if (firstRelance && !data.dateR) data.dateR = firstRelance;
+    // Calculer la première date de relance automatiquement (sauf si won/lost)
+    if (!data.dateR && status !== 'won' && status !== 'lost') {
+      data.dateR = computeNextRelance({ ...data, nbRelances: 0 });
+    }
     ({ error } = await _sb.from('clients').insert([data]));
   }
 
@@ -908,6 +977,7 @@ document.addEventListener('keydown', e => {
     closeModal();
     closeRelanceModal();
     closeScriptModal();
+    closeLostModal();
     document.getElementById('notif-panel').style.display = 'none';
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
@@ -923,7 +993,7 @@ document.addEventListener('click', e => {
   }
 });
 
-['modal','relance-modal','script-modal'].forEach(id => {
+['modal','relance-modal','script-modal','lost-modal'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
 });
