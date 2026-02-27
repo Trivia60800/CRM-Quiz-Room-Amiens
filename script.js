@@ -891,10 +891,7 @@ async function deleteClient() {
 }
 
 // ==========================================
-// CSV IMPORT
-// ==========================================
-// ==========================================
-// CSV IMPORT (VERSION RÉPARÉE)
+// IMPORT CSV - VERSION ROBUSTE (Virgules, Points-virgules, Espaces)
 // ==========================================
 function handleCSV(event) {
   const file = event.target.files[0];
@@ -905,100 +902,94 @@ function handleCSV(event) {
   reader.onload = async (e) => {
     let raw = e.target.result;
     
-    // Nettoyage du BOM UTF-8 et des espaces inutiles en début/fin de fichier
+    // Enlever le BOM UTF-8 si présent et nettoyer les lignes
     raw = raw.replace(/^\uFEFF/, '').trim();
-    
     const lines = raw.split(/\r?\n/).filter(l => l.trim());
 
-    if (lines.length < 2) { 
-      toast('Fichier CSV vide ou mal formaté', 'error'); 
-      return; 
+    if (lines.length < 2) {
+      toast('Le fichier semble vide', 'error');
+      return;
     }
 
-    // Détection du séparateur (virgule ou point-virgule)
+    // Détection automatique du séparateur (virgule ou point-virgule)
     const firstLine = lines[0];
-    const sep = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+    const sep = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
     
-    // Nettoyage agressif des headers pour la correspondance
+    // Nettoyage des headers (minuscules, sans accents)
     const headers = firstLine.split(sep).map(h => 
-      h.trim().toLowerCase()
-       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Enlève les accents
-       .replace(/[^a-z0-9]/g, '') // Garde uniquement lettres et chiffres
+      h.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     );
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
-      const vals = lines[i].split(sep).map(v => v.trim().replace(/^"|"$/g, ''));
-      const row = {};
-      headers.forEach((h, idx) => { row[h] = vals[idx] || ''; });
-
-      // Recherche intelligente de la colonne Entreprise
-      const name = row.entreprise || row.company || row.societe || row.nom || row.name || row.client || vals[0];
+      // Gestion des colonnes avec des guillemets (si présence de virgules dans le texte)
+      let vals = [];
+      if (sep === ',') {
+        const regex = /(".*?"|[^",\r\n]+)(?=\s*,|\s*$|\r|\n)/g;
+        vals = lines[i].match(regex) || [];
+      } else {
+        vals = lines[i].split(';');
+      }
       
-      if (!name || name.toLowerCase() === 'entreprise') continue;
+      const row = {};
+      headers.forEach((h, idx) => {
+        let v = vals[idx] ? vals[idx].trim().replace(/^"|"$/g, '') : '';
+        row[h] = v;
+      });
+
+      // Mapping basé sur ton fichier actuel (priorité aux noms de tes colonnes)
+      const entreprise = row['entreprise'] || row['nom de lentreprise'] || vals[0];
+      if (!entreprise || entreprise.toLowerCase() === 'entreprise') continue;
 
       const rowData = {
-        entreprise: name,
-        contact:    row.contact || row.interlocuteur || '',
-        email:      row.email || row.mail || row.courriel || '',
-        tel:        row.tel || row.telephone || row.phone || row.mobile || '',
-        prix:       parseFloat((row.prix || row.price || row.montant || '0').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0,
-        status:     'new', // Par défaut pour un import
-        dateE:      parseDate(row.datee || row.date || row.dateevenement || row.evenement || ''),
-        dateR:      parseDate(row.dater || row.daterelance || row.relance || ''),
-        infos:      row.infos || row.notes || row.commentaires || row.details || '',
+        entreprise: entreprise,
+        contact:    row['contact'] || row['nom du contact'] || '',
+        email:      row['email'] || '',
+        tel:        row['telephone'] || '',
+        // Nettoyage du prix (enlève €, les espaces normaux et les espaces insécables d'Excel)
+        prix:       parseFloat((row['prix du devis'] || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0,
+        status:     (row['statut'] && row['statut'].toLowerCase().includes('annul')) ? 'lost' : 'new',
+        dateE:      parseDate(row['date de levenement'] || row['datee']),
+        dateR:      parseDate(row['date de relance'] || row['dater']),
+        infos:      row['infos +'] || row['reponse relance'] || '',
         nbRelances: 0,
-        dateC:      TODAY
+        dateC:      new Date().toISOString().split('T')[0]
       };
 
-      // Calculer première relance si pas de dateR dans le CSV
-      if (!rowData.dateR && rowData.status !== 'won' && rowData.status !== 'lost') {
-        rowData.dateR = computeNextRelance(rowData);
-      }
       rows.push(rowData);
     }
 
-    if (rows.length === 0) { 
-      toast('Aucune ligne valide trouvée. Vérifiez vos colonnes.', 'error'); 
-      return; 
+    if (rows.length === 0) {
+      toast('Aucune donnée valide trouvée', 'error');
+      return;
     }
 
-    showImportLoader(`Import de ${rows.length} dossier(s)…`);
+    showImportLoader(`Import de ${rows.length} dossier(s)...`);
 
-    const BATCH = 50;
-    let imported = 0, errors = 0;
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const batch = rows.slice(i, i + BATCH);
-      const { error } = await _sb.from('clients').insert(batch);
-      if (error) { 
-        console.error('Batch error:', error); 
-        errors += batch.length; 
-      } else { 
-        imported += batch.length; 
-      }
-      showImportLoader(`Import… ${Math.min(i + BATCH, rows.length)} / ${rows.length}`);
-    }
+    // Envoi à Supabase
+    const { error } = await _sb.from('clients').insert(rows);
 
     hideImportLoader();
-    if (errors > 0 && imported === 0) {
-      toast(`Échec de l'import : vérifiez la connexion Supabase`, 'error');
-    } else if (errors > 0) {
-      toast(`${imported} importés, ${errors} échecs`, 'info');
+    if (error) {
+      console.error(error);
+      toast('Erreur Supabase : ' + error.message, 'error');
     } else {
-      toast(`${imported} dossiers importés avec succès !`, 'success');
+      toast(`${rows.length} dossiers importés avec succès !`, 'success');
+      loadData();
     }
-    loadData();
   };
-  reader.onerror = () => toast('Impossible de lire le fichier', 'error');
   reader.readAsText(file, 'UTF-8');
 }
 
+// Fonction de parsing de date améliorée
 function parseDate(str) {
   if (!str) return null;
   str = str.trim();
+  // Format AAAA-MM-JJ (déjà bon)
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  // Format JJ/MM/AAAA (français)
   const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   return null;
 }
 
