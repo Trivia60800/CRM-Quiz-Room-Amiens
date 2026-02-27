@@ -1,108 +1,260 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRM Quiz Room Amiens</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        .kanban-view { display: grid; grid-template-columns: repeat(5, minmax(280px, 1fr)); gap: 1.5rem; }
-        .card { background: white; border-radius: 1rem; padding: 1.25rem; margin-bottom: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); cursor: grab; border: 1px solid #f1f5f9; transition: all 0.2s; }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-        .actions { display: flex; gap: 0.5rem; margin-top: 1rem; border-top: 1px solid #f1f5f9; pt-3; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRM · Quiz Room Amiens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
-<body class="bg-[#f8fafc] min-h-screen">
+<body>
 
-    <header class="bg-white border-b p-6 sticky top-0 z-10">
-        <div class="max-w-[1600px] mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-            <h1 class="text-2xl font-black text-slate-800 tracking-tight">QUIZ ROOM <span class="text-indigo-600">AMIENS</span></h1>
-            
-            <div class="flex items-center gap-6 bg-slate-50 p-2 rounded-2xl border">
-                <div class="px-4 border-r"><p class="text-[10px] text-slate-400 font-bold uppercase">En attente</p><p id="statPending" class="text-lg font-black text-slate-700">0€</p></div>
-                <div class="px-4 border-r"><p class="text-[10px] text-slate-400 font-bold uppercase">Gagné</p><p id="statWon" class="text-lg font-black text-indigo-600">0€</p></div>
-                <div class="px-4"><p class="text-[10px] text-slate-400 font-bold uppercase">Conversion</p><p id="statConv" class="text-lg font-black text-emerald-500">0%</p></div>
-            </div>
+<!-- HEADER -->
+<header>
+  <div class="logo">QUIZ ROOM <span>AMIENS</span></div>
 
-            <div class="flex gap-2">
-                <input type="text" id="searchBar" oninput="refreshUI()" placeholder="Rechercher..." class="px-4 py-2 rounded-xl border-none bg-slate-100 text-sm focus:ring-2 focus:ring-indigo-500">
-                <button onclick="openAddModal()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg shadow-indigo-200">+ NOUVEAU</button>
-                <label class="bg-white border border-slate-200 px-4 py-2 rounded-xl font-bold text-sm cursor-pointer hover:bg-slate-50">
-                    IMPORT CSV <input type="file" accept=".csv" onchange="handleCSV(event)" class="hidden">
-                </label>
-            </div>
-        </div>
-    </header>
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-label">En attente</div>
+      <div class="stat-value" id="statPending" style="color:var(--muted)">0€</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-label">Gagné</div>
+      <div class="stat-value" id="statWon" style="color:var(--won)">0€</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-label">Conversion</div>
+      <div class="stat-value" id="statConv" style="color:var(--accent2)">0%</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-label">Relances dues</div>
+      <div class="stat-value" id="statDue" style="color:var(--urgent)">0</div>
+    </div>
+  </div>
 
-    <main id="main-content" class="p-6 kanban-view overflow-x-auto">
-        <div class="flex flex-col h-full">
-            <div class="flex justify-between items-center mb-4 px-2">
-                <h2 class="font-black text-slate-400 text-xs uppercase tracking-widest">Nouveaux <span id="cnt-new" class="ml-2 bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">0</span></h2>
-            </div>
-            <div id="new" class="flex-1 min-h-[500px]"></div>
-        </div>
-
-        <div class="flex flex-col h-full">
-            <div class="flex justify-between items-center mb-4 px-2">
-                <h2 class="font-black text-indigo-400 text-xs uppercase tracking-widest">En cours <span id="cnt-progress" class="ml-2 bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full">0</span></h2>
-            </div>
-            <div id="progress" class="flex-1 min-h-[500px]"></div>
-        </div>
-
-        <div class="flex flex-col h-full">
-            <div class="flex justify-between items-center mb-4 px-2">
-                <h2 class="font-black text-rose-400 text-xs uppercase tracking-widest">À Relancer <span id="cnt-urgent" class="ml-2 bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full">0</span></h2>
-            </div>
-            <div id="urgent" class="flex-1 min-h-[500px]"></div>
-        </div>
-
-        <div class="flex flex-col h-full">
-            <div class="flex justify-between items-center mb-4 px-2">
-                <h2 class="font-black text-emerald-400 text-xs uppercase tracking-widest">Gagné <span id="cnt-won" class="ml-2 bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full">0</span></h2>
-            </div>
-            <div id="won" class="flex-1 min-h-[500px]"></div>
-        </div>
-
-        <div class="flex flex-col h-full">
-            <div class="flex justify-between items-center mb-4 px-2">
-                <h2 class="font-black text-slate-300 text-xs uppercase tracking-widest">Perdu <span id="cnt-lost" class="ml-2 bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full">0</span></h2>
-            </div>
-            <div id="lost" class="flex-1 min-h-[500px]"></div>
-        </div>
-    </main>
-
-    <div id="modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden">
-            <div class="p-8">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-xl font-black text-slate-800">Détails du dossier</h3>
-                    <button onclick="closeModal()" class="text-slate-400 hover:text-rose-500"><i class="fa-solid fa-xmark text-xl"></i></button>
-                </div>
-                <form id="clientForm" onsubmit="event.preventDefault(); saveClient();" class="grid grid-cols-2 gap-4">
-                    <div class="col-span-2"><label class="text-[10px] font-bold uppercase text-slate-400">Entreprise</label><input type="text" id="f-entreprise" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1" required></div>
-                    <div><label class="text-[10px] font-bold uppercase text-slate-400">Contact</label><input type="text" id="f-contact" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1"></div>
-                    <div><label class="text-[10px] font-bold uppercase text-slate-400">Téléphone</label><input type="text" id="f-tel" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1"></div>
-                    <div><label class="text-[10px] font-bold uppercase text-slate-400">Email</label><input type="email" id="f-email" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1"></div>
-                    <div><label class="text-[10px] font-bold uppercase text-slate-400">Prix (€)</label><input type="number" step="0.01" id="f-prix" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1"></div>
-                    <div><label class="text-[10px] font-bold uppercase text-slate-400">Date Évènement</label><input type="date" id="f-dateE" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1"></div>
-                    <div><label class="text-[10px] font-bold uppercase text-slate-400">Date Relance</label><input type="date" id="f-dateR" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1"></div>
-                    <div class="hidden"><input type="number" id="f-nbRelances"></div>
-                    <div class="col-span-2">
-                        <label class="text-[10px] font-bold uppercase text-slate-400">Notes & Historique</label>
-                        <textarea id="f-infos" rows="6" class="w-full p-3 rounded-xl bg-slate-50 border-none mt-1 text-sm font-mono" placeholder="Notes de relance..."></textarea>
-                    </div>
-                    <div class="col-span-2 flex gap-3 mt-4">
-                        <button type="button" onclick="deleteClient()" class="px-6 py-3 rounded-xl font-bold text-sm text-rose-500 hover:bg-rose-50">SUPPRIMER</button>
-                        <button type="submit" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-100">ENREGISTRER</button>
-                    </div>
-                </form>
-            </div>
-        </div>
+  <div class="header-right">
+    <div class="search-wrap">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="text" id="searchBar" placeholder="Rechercher..." oninput="refreshUI()">
     </div>
 
-    <script src="script.js"></script>
+    <div class="view-toggle">
+      <button class="view-btn active" id="btn-kanban" onclick="setView('kanban')">
+        <i class="fa-solid fa-table-columns"></i>
+      </button>
+      <button class="view-btn" id="btn-list" onclick="setView('list')">
+        <i class="fa-solid fa-list"></i>
+      </button>
+    </div>
+
+    <button class="btn btn-secondary" id="notif-btn" onclick="toggleNotifPanel()">
+      <i class="fa-solid fa-bell"></i>
+      <span id="notif-badge"></span>
+    </button>
+
+    <button class="btn btn-primary" onclick="openAddModal()">
+      <i class="fa-solid fa-plus"></i> Nouveau
+    </button>
+
+    <label class="btn btn-secondary" style="cursor:pointer">
+      <i class="fa-solid fa-file-import"></i> CSV
+      <input type="file" accept=".csv" onchange="handleCSV(event)" style="display:none">
+    </label>
+  </div>
+</header>
+
+<!-- FILTER BAR -->
+<div class="filter-bar">
+  <span class="filter-label">Filtres :</span>
+  <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">Tous</button>
+  <button class="filter-chip" data-filter="new" onclick="setFilter('new')">Nouveaux</button>
+  <button class="filter-chip" data-filter="progress" onclick="setFilter('progress')">En cours</button>
+  <button class="filter-chip urgent-chip" data-filter="urgent" onclick="setFilter('urgent')">À relancer</button>
+  <button class="filter-chip" data-filter="won" onclick="setFilter('won')">Gagné</button>
+  <button class="filter-chip" data-filter="lost" onclick="setFilter('lost')">Perdu</button>
+
+  <div class="date-filter">
+    <label>Événement du</label>
+    <input type="date" id="filterDateFrom" onchange="refreshUI()">
+    <label>au</label>
+    <input type="date" id="filterDateTo" onchange="refreshUI()">
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- KANBAN VIEW -->
+  <div id="kanban-view">
+    <div class="col-group">
+      <div class="col-header">
+        <span class="col-title" style="color:var(--new)">Nouveaux</span>
+        <span class="cnt" id="cnt-new">0</span>
+      </div>
+      <div class="kanban-list" id="list-new"></div>
+    </div>
+
+    <div class="col-group">
+      <div class="col-header">
+        <span class="col-title" style="color:var(--progress)">En cours</span>
+        <span class="cnt" id="cnt-progress">0</span>
+      </div>
+      <div class="kanban-list" id="list-progress"></div>
+    </div>
+
+    <div class="col-group">
+      <div class="col-header">
+        <span class="col-title" style="color:var(--urgent)">À Relancer</span>
+        <span class="cnt" id="cnt-urgent">0</span>
+      </div>
+      <div class="kanban-list" id="list-urgent"></div>
+    </div>
+
+    <div class="col-group">
+      <div class="col-header">
+        <span class="col-title" style="color:var(--won)">Gagné</span>
+        <span class="cnt" id="cnt-won">0</span>
+      </div>
+      <div class="kanban-list" id="list-won"></div>
+    </div>
+
+    <div class="col-group">
+      <div class="col-header">
+        <span class="col-title" style="color:var(--lost)">Perdu</span>
+        <span class="cnt" id="cnt-lost">0</span>
+      </div>
+      <div class="kanban-list" id="list-lost"></div>
+    </div>
+  </div>
+
+  <!-- LIST VIEW -->
+  <div id="list-view">
+    <table class="list-table">
+      <thead>
+        <tr>
+          <th onclick="sortList('entreprise')">Entreprise <i class="fa-solid fa-sort"></i></th>
+          <th onclick="sortList('contact')">Contact</th>
+          <th onclick="sortList('prix')">Prix</th>
+          <th onclick="sortList('status')">Statut</th>
+          <th onclick="sortList('dateR')">Date relance</th>
+          <th onclick="sortList('dateE')">Date évèn.</th>
+          <th>Relances</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="list-tbody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- NOTIFICATION PANEL -->
+<div id="notif-panel">
+  <div class="notif-header">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    Relances à faire
+  </div>
+  <div id="notif-list" class="notif-list"></div>
+</div>
+
+<!-- EDIT / ADD MODAL -->
+<div id="modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Nouveau dossier</div>
+      <div class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></div>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group form-full">
+          <label>Entreprise *</label>
+          <input type="text" id="f-entreprise" required>
+        </div>
+        <div class="form-group">
+          <label>Contact</label>
+          <input type="text" id="f-contact">
+        </div>
+        <div class="form-group">
+          <label>Téléphone</label>
+          <input type="text" id="f-tel">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="f-email">
+        </div>
+        <div class="form-group">
+          <label>Prix (€)</label>
+          <input type="number" step="0.01" id="f-prix" value="0">
+        </div>
+        <div class="form-group">
+          <label>Statut</label>
+          <select id="f-status">
+            <option value="new">Nouveau</option>
+            <option value="progress">En cours</option>
+            <option value="urgent">À relancer</option>
+            <option value="won">Gagné</option>
+            <option value="lost">Perdu</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Date Événement</label>
+          <input type="date" id="f-dateE">
+        </div>
+        <div class="form-group">
+          <label>Date Relance</label>
+          <input type="date" id="f-dateR">
+        </div>
+        <input type="hidden" id="f-nbRelances" value="0">
+        <div class="form-group form-full">
+          <label>Notes & Historique</label>
+          <textarea id="f-infos" placeholder="Notes de relance..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="deleteClient()"><i class="fa-solid fa-trash"></i> Supprimer</button>
+      <div class="spacer"></div>
+      <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveClient()"><i class="fa-solid fa-check"></i> Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- RELANCE MODAL -->
+<div id="relance-modal">
+  <div class="relance-box">
+    <div class="relance-title">Enregistrer une relance</div>
+    <div class="relance-options">
+      <button class="relance-option" data-val="Mail" onclick="selectRelanceOption(this)">
+        <i class="fa-solid fa-envelope"></i> Mail
+      </button>
+      <button class="relance-option" data-val="Tel" onclick="selectRelanceOption(this)">
+        <i class="fa-solid fa-phone"></i> Téléphone
+      </button>
+      <button class="relance-option" data-val="SMS" onclick="selectRelanceOption(this)">
+        <i class="fa-solid fa-comment-sms"></i> SMS
+      </button>
+      <button class="relance-option" data-val="Autre" onclick="selectRelanceOption(this)">
+        <i class="fa-solid fa-ellipsis"></i> Autre
+      </button>
+    </div>
+    <textarea class="relance-note" id="relance-note" placeholder="Note sur cet échange (optionnel)..."></textarea>
+    <div class="relance-footer">
+      <button class="btn btn-secondary" style="flex:1" onclick="closeRelanceModal()">Annuler</button>
+      <button class="btn btn-primary" style="flex:2" onclick="confirmRelance()">
+        <i class="fa-solid fa-check"></i> Confirmer la relance
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"><i id="toast-icon"></i> <span id="toast-msg"></span></div>
+
+<script src="script.js"></script>
 </body>
 </html>
