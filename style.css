@@ -408,6 +408,29 @@ header {
 }
 .script-textarea:focus { outline: none; border-color: var(--accent); background: white; box-shadow: 0 0 0 3px var(--accent-soft); }
 
+/* Lost modal */
+#lost-modal {
+  display: none; position: fixed; inset: 0;
+  background: rgba(26,25,23,0.4); backdrop-filter: blur(4px);
+  z-index: 450; align-items: center; justify-content: center; padding: 20px;
+}
+#lost-modal.open { display: flex; }
+
+.lost-modal-header {
+  display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px;
+}
+.lost-icon {
+  font-size: 28px; color: var(--urgent); flex-shrink: 0; margin-top: 2px;
+}
+.lost-modal-company {
+  font-size: 13px; color: var(--muted); font-weight: 500;
+}
+.lost-reason-label {
+  display: block; font-size: 10px; font-weight: 700;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
 /* ==========================================
    TOAST
    ========================================== */
