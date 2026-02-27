@@ -1,12 +1,21 @@
 // ==========================================
-// 1. SÉCURITÉ D'ACCÈS AU SITE
+// 1. CONFIGURATION ET SÉCURITÉ
 // ==========================================
+const CONFIG = {
+    URL: 'https://sdtgzlrwsrmhsvoztdat.supabase.co',
+    ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k',
+    AUTH_PASS: "AMIENS2026"
+};
+
+const _supabase = supabase.createClient(CONFIG.URL, CONFIG.ANON_KEY);
+
+// Système de verrouillage à l'ouverture du site
 (function() {
     let access = sessionStorage.getItem('qr_amiens_auth');
     while (access !== 'ok') {
         const mdp = prompt("Accès restreint - Veuillez saisir le code secret :");
-        if (mdp === null) return; // Si l'utilisateur clique sur Annuler
-        if (mdp === "AMIENS2026") {
+        if (mdp === null) return; 
+        if (mdp === CONFIG.AUTH_PASS) {
             sessionStorage.setItem('qr_amiens_auth', 'ok');
             access = 'ok';
         } else {
@@ -15,18 +24,11 @@
     }
 })();
 
-// ==========================================
-// 2. CONFIGURATION SUPABASE
-// ==========================================
-const supabaseUrl = 'https://sdtgzlrwsrmhsvoztdat.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k';
-const _supabase = supabase.createClient(supabaseUrl, supabaseKey);
-
 let clients = [];
 let currentId = null;
 
 // ==========================================
-// 3. LOGIQUE DES JOURS OUVRÉS
+// 2. LOGIQUE DES DATES ET RELANCES
 // ==========================================
 function addBusinessDays(date, days) {
     let result = new Date(date);
@@ -45,7 +47,62 @@ function getNextRelanceDate(count) {
 }
 
 // ==========================================
-// 4. CHARGEMENT ET SYNCHRONISATION
+// 3. IMPORTATION DU FICHIER GOOGLE SHEETS (CSV)
+// ==========================================
+async function handleCSV(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = async function(e) {
+        const text = e.target.result;
+        const rows = text.split('\n').slice(1); // On ignore la ligne d'en-tête
+        
+        const toInsert = rows.map(row => {
+            // Découpe les colonnes en gérant les guillemets pour les prix (ex: "636,50€")
+            const cols = row.match(/(".*?"|[^",\r\n]+)(?=\s*,|\s*$|\r|\n)/g) || [];
+            if (cols.length < 5) return null;
+
+            // Nettoyage du prix (ex: "1 105€" -> 1105)
+            let prixNettoye = 0;
+            if (cols[11]) {
+                prixNettoye = parseFloat(cols[11].replace(/"/g, '').replace('€', '').replace(/\s/g, '').replace(',', '.')) || 0;
+            }
+
+            // Conversion des dates DD/MM/YYYY vers YYYY-MM-DD
+            const formatDate = (d) => {
+                if (!d || d.trim() === "" || d === '""') return null;
+                const parts = d.replace(/"/g, '').split('/');
+                return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : null;
+            };
+
+            return {
+                entreprise: cols[0]?.replace(/"/g, '').trim() || "Inconnu", // Col 0: Entreprise
+                contact: cols[1]?.replace(/"/g, '').trim() || "",         // Col 1: Contact
+                email: cols[2]?.replace(/"/g, '').trim() || "",           // Col 2: Email
+                tel: cols[3]?.replace(/"/g, '').trim() || "",             // Col 3: Téléphone
+                prix: prixNettoye,                                        // Col 11: Prix
+                status: cols[10]?.includes('Annulé') ? 'lost' : 'new',    // Col 10: Statut
+                dateE: formatDate(cols[5]),                               // Col 5: Date événement
+                dateR: formatDate(cols[7]),                               // Col 7: Date relance
+                infos: cols[13]?.replace(/"/g, '').trim() || "",          // Col 13: Infos +
+                dateC: new Date().toISOString().split('T')[0]
+            };
+        }).filter(x => x !== null);
+
+        const { error } = await _supabase.from('clients').insert(toInsert);
+        
+        if (error) {
+            alert("Erreur d'importation : " + error.message);
+        } else {
+            alert(toInsert.length + " clients importés avec succès !");
+            loadData();
+        }
+    };
+    reader.readAsText(file);
+}
+
+// ==========================================
+// 4. CHARGEMENT ET AFFICHAGE (SUPABASE)
 // ==========================================
 async function loadData() {
     try {
@@ -82,7 +139,7 @@ function refreshUI() {
         filtered.forEach(c => {
             const prix = parseFloat(c.prix || 0);
             
-            // Mise à jour automatique en "Urgent" si la date de relance est passée
+            // Passage auto en Urgent si la date de relance est dépassée
             if (c.dateR && c.dateR <= today && (status === 'new' || status === 'progress')) {
                 updateStatus(c.id, 'urgent');
             }
@@ -112,12 +169,11 @@ function refreshUI() {
             container.appendChild(card);
         });
     });
-    
     updateStats();
 }
 
 // ==========================================
-// 5. GESTION DU SCRIPT DE RELANCE
+// 5. ACTIONS ET MODALES
 // ==========================================
 function copyRelanceScript(id, e) {
     e.stopPropagation();
@@ -129,9 +185,6 @@ function copyRelanceScript(id, e) {
     });
 }
 
-// ==========================================
-// 6. ACTIONS CRUD (SUPABASE)
-// ==========================================
 async function saveClient() {
     const data = {
         entreprise: document.getElementById('f-entreprise').value,
@@ -176,16 +229,13 @@ async function updateStatus(id, stat, e) {
 }
 
 async function deleteClient() {
-    if(confirm("Supprimer définitivement ce dossier ?")) {
+    if(confirm("Supprimer ce dossier ?")) {
         await _supabase.from('clients').delete().eq('id', currentId);
         closeModal();
         loadData();
     }
 }
 
-// ==========================================
-// 7. INTERFACE ET MODALE
-// ==========================================
 function openEditModal(id) {
     currentId = id;
     const c = clients.find(x => x.id === id);
@@ -201,15 +251,8 @@ function openEditModal(id) {
     document.getElementById('modal').classList.remove('hidden');
 }
 
-function openAddModal() { 
-    currentId = null; 
-    document.getElementById('clientForm').reset(); 
-    document.getElementById('modal').classList.remove('hidden'); 
-}
-
-function closeModal() { 
-    document.getElementById('modal').classList.add('hidden'); 
-}
+function openAddModal() { currentId = null; document.getElementById('clientForm').reset(); document.getElementById('modal').classList.remove('hidden'); }
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
 
 function updateStats() {
     let pending = 0, won = 0, cWon = 0, cLost = 0;
@@ -224,7 +267,7 @@ function updateStats() {
     document.getElementById('statConv').innerText = total > 0 ? Math.round((cWon / total) * 100) + "%" : "0%";
 }
 
-// Drag & Drop
+// Initialisation du Drag & Drop
 ['new', 'progress', 'urgent', 'won', 'lost'].forEach(s => {
     const el = document.getElementById(s);
     if(el) {
@@ -236,5 +279,4 @@ function updateStats() {
     }
 });
 
-// Lancement au chargement
 loadData();
