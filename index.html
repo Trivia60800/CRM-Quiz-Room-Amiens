@@ -281,6 +281,27 @@
   </div>
 </div>
 
+<!-- LOST MODAL -->
+<div id="lost-modal">
+  <div class="relance-box">
+    <div class="lost-modal-header">
+      <span class="lost-icon"><i class="fa-solid fa-circle-xmark"></i></span>
+      <div>
+        <div class="relance-title" style="margin-bottom:4px">Classer comme perdu</div>
+        <div id="lost-modal-company" class="lost-modal-company"></div>
+      </div>
+    </div>
+    <label class="lost-reason-label">Raison de la non-signature <span style="color:var(--muted);font-weight:400">(facultatif)</span></label>
+    <textarea id="lost-reason" class="relance-note" placeholder="Ex : budget insuffisant, concurrent choisi, projet annulé…"></textarea>
+    <div class="relance-footer">
+      <button class="btn btn-secondary" style="flex:1" onclick="closeLostModal()">Annuler</button>
+      <button class="btn" style="flex:2;background:#dc2626;color:white" onclick="confirmLost()">
+        <i class="fa-solid fa-xmark"></i> Confirmer — Perdu
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- IMPORT LOADER -->
 <div id="import-loader">
   <div class="spinner"></div>
