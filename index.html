@@ -13,6 +13,7 @@
 </head>
 <body>
 
+<!-- HEADER -->
 <header>
   <div class="logo">Quiz Room <span>Amiens</span></div>
 
@@ -40,7 +41,6 @@
       <i class="fa-solid fa-magnifying-glass"></i>
       <input type="text" id="searchBar" placeholder="Rechercher…" oninput="refreshUI()">
     </div>
-
     <div class="view-toggle">
       <button class="view-btn active" id="btn-kanban" onclick="setView('kanban')">
         <i class="fa-solid fa-table-columns"></i>
@@ -49,16 +49,13 @@
         <i class="fa-solid fa-list"></i>
       </button>
     </div>
-
     <button class="btn btn-secondary" id="notif-btn" onclick="toggleNotifPanel()">
       <i class="fa-solid fa-bell"></i>
       <span id="notif-badge"></span>
     </button>
-
     <button class="btn btn-primary" onclick="openAddModal()">
       <i class="fa-solid fa-plus"></i> Nouveau
     </button>
-
     <label class="btn btn-secondary" style="cursor:pointer">
       <i class="fa-solid fa-file-import"></i> Import CSV
       <input type="file" accept=".csv" onchange="handleCSV(event)" style="display:none" id="csvInput">
@@ -66,6 +63,7 @@
   </div>
 </header>
 
+<!-- FILTER BAR -->
 <div class="filter-bar">
   <span class="filter-label">Filtres</span>
   <button class="filter-chip active" data-filter="all"      onclick="setFilter('all')">Tous</button>
@@ -74,7 +72,6 @@
   <button class="filter-chip urgent-chip" data-filter="urgent" onclick="setFilter('urgent')">À relancer</button>
   <button class="filter-chip"        data-filter="won"      onclick="setFilter('won')">Gagné</button>
   <button class="filter-chip"        data-filter="lost"     onclick="setFilter('lost')">Perdu</button>
-
   <div class="date-filter">
     <label>Événement du</label>
     <input type="date" id="filterDateFrom" onchange="refreshUI()">
@@ -83,8 +80,26 @@
   </div>
 </div>
 
+<!-- BANNER : ÉVÉNEMENTS PASSÉS À CLASSER -->
+<div id="classify-banner" style="display:none">
+  <div class="classify-banner-inner">
+    <div class="classify-banner-header">
+      <div class="classify-banner-title">
+        <i class="fa-solid fa-calendar-xmark"></i>
+        Événements passés — à classer
+      </div>
+      <button class="classify-dismiss" onclick="dismissBanner()">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="classify-list" class="classify-list"></div>
+  </div>
+</div>
+
+<!-- APP -->
 <div id="app">
 
+  <!-- KANBAN -->
   <div id="kanban-view">
     <div class="col-group">
       <div class="col-header">
@@ -102,7 +117,10 @@
     </div>
     <div class="col-group">
       <div class="col-header">
-        <span class="col-title" style="color:var(--urgent)">À relancer</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="col-title" style="color:var(--urgent)">À relancer</span>
+          <span class="col-hint">par priorité</span>
+        </div>
         <span class="cnt" id="cnt-urgent">0</span>
       </div>
       <div class="kanban-list" id="list-urgent"></div>
@@ -123,6 +141,7 @@
     </div>
   </div>
 
+  <!-- LIST VIEW -->
   <div id="list-view">
     <table class="list-table">
       <thead>
@@ -143,7 +162,7 @@
 
 </div>
 
-<!-- Notification panel -->
+<!-- NOTIFICATION PANEL -->
 <div id="notif-panel">
   <div class="notif-header">
     <i class="fa-solid fa-triangle-exclamation"></i> Relances à faire
@@ -151,7 +170,7 @@
   <div id="notif-list" class="notif-list"></div>
 </div>
 
-<!-- Edit/Add modal -->
+<!-- EDIT / ADD MODAL -->
 <div id="modal">
   <div class="modal-box">
     <div class="modal-header">
@@ -209,38 +228,66 @@
       <button class="btn btn-danger" onclick="deleteClient()"><i class="fa-solid fa-trash"></i> Supprimer</button>
       <div class="spacer"></div>
       <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-primary" onclick="saveClient()"><i class="fa-solid fa-check"></i> Enregistrer</button>
+      <button class="btn btn-primary"   onclick="saveClient()"><i class="fa-solid fa-check"></i> Enregistrer</button>
     </div>
   </div>
 </div>
 
-<!-- Relance modal -->
+<!-- RELANCE MODAL -->
 <div id="relance-modal">
   <div class="relance-box">
     <div class="relance-title">Enregistrer une relance</div>
     <div class="relance-options">
-      <button class="relance-option" data-val="Mail"     onclick="selectRelanceOption(this)"><i class="fa-solid fa-envelope"></i> Mail</button>
-      <button class="relance-option" data-val="Tel"      onclick="selectRelanceOption(this)"><i class="fa-solid fa-phone"></i> Téléphone</button>
-      <button class="relance-option" data-val="SMS"      onclick="selectRelanceOption(this)"><i class="fa-solid fa-comment-sms"></i> SMS</button>
-      <button class="relance-option" data-val="Autre"    onclick="selectRelanceOption(this)"><i class="fa-solid fa-ellipsis"></i> Autre</button>
+      <button class="relance-option" data-val="Mail"  onclick="selectRelanceOption(this)"><i class="fa-solid fa-envelope"></i> Mail</button>
+      <button class="relance-option" data-val="Tel"   onclick="selectRelanceOption(this)"><i class="fa-solid fa-phone"></i> Téléphone</button>
+      <button class="relance-option" data-val="SMS"   onclick="selectRelanceOption(this)"><i class="fa-solid fa-comment-sms"></i> SMS</button>
+      <button class="relance-option" data-val="Autre" onclick="selectRelanceOption(this)"><i class="fa-solid fa-ellipsis"></i> Autre</button>
     </div>
     <textarea class="relance-note" id="relance-note" placeholder="Note sur cet échange (optionnel)…"></textarea>
+    <div id="relance-next-date" class="relance-next-date" style="display:none"></div>
     <div class="relance-footer">
-      <button class="btn btn-secondary" style="flex:1"  onclick="closeRelanceModal()">Annuler</button>
-      <button class="btn btn-primary"   style="flex:2"  onclick="confirmRelance()">
+      <button class="btn btn-secondary" style="flex:1" onclick="closeRelanceModal()">Annuler</button>
+      <button class="btn btn-primary"   style="flex:2" onclick="confirmRelance()">
         <i class="fa-solid fa-check"></i> Confirmer
       </button>
     </div>
   </div>
 </div>
 
-<!-- Import loader -->
+<!-- SCRIPT MODAL -->
+<div id="script-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="script-modal-title">Script de relance</div>
+        <div id="script-context" class="script-context"></div>
+      </div>
+      <div class="modal-close" onclick="closeScriptModal()"><i class="fa-solid fa-xmark"></i></div>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+        <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--accent)"></i>
+        Script généré selon l'historique et la date d'événement. Vous pouvez l'éditer avant de copier.
+      </p>
+      <textarea id="script-text" class="script-textarea"></textarea>
+    </div>
+    <div class="modal-footer">
+      <div class="spacer"></div>
+      <button class="btn btn-secondary" onclick="closeScriptModal()">Fermer</button>
+      <button class="btn btn-primary"   onclick="copyScriptText()">
+        <i class="fa-solid fa-copy"></i> Copier le script
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- IMPORT LOADER -->
 <div id="import-loader">
   <div class="spinner"></div>
   <span id="import-msg">Import en cours…</span>
 </div>
 
-<!-- Toast -->
+<!-- TOAST -->
 <div id="toast"><i id="toast-icon"></i> <span id="toast-msg"></span></div>
 
 <script src="script.js"></script>
