@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quiz Room Amiens | CRM Pro</title>
+    <title>Quiz Room Amiens | CRM Cloud</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-[#f8fafc]">
@@ -14,7 +15,7 @@
     <nav class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-50">
         <div class="max-w-[1800px] mx-auto flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-4">
-                <div class="bg-indigo-600 text-white p-2 rounded-xl font-bold">QR</div>
+                <div class="bg-indigo-600 text-white p-2 rounded-xl font-bold shadow-lg shadow-indigo-100 text-sm">QR</div>
                 <h1 class="text-xl font-extrabold tracking-tight">Amiens <span class="text-indigo-600">Pipeline</span></h1>
                 <div class="flex bg-slate-100 p-1 rounded-lg ml-4 border border-slate-200">
                     <button onclick="setView('kanban')" id="btn-kanban" class="view-btn active">Kanban</button>
@@ -24,13 +25,10 @@
 
             <div class="flex items-center gap-3">
                 <input type="file" id="csvInput" accept=".csv" class="hidden" onchange="handleCSV(event)">
-                <button onclick="document.getElementById('csvInput').click()" class="text-slate-500 hover:bg-slate-100 px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 transition-all">
-                    <i class="fa-solid fa-file-import mr-2"></i>Importer Sheets (CSV)
+                <button onclick="document.getElementById('csvInput').click()" class="text-slate-500 hover:bg-slate-100 px-3 py-2 rounded-lg text-xs font-bold border border-slate-200">
+                    <i class="fa-solid fa-file-import mr-2"></i>Import CSV
                 </button>
-                <button onclick="exportBackup()" class="text-slate-500 hover:bg-slate-100 px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 transition-all">
-                    <i class="fa-solid fa-download mr-2"></i>Sauvegarde
-                </button>
-                <button onclick="openAddModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95">
+                <button onclick="openAddModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-all">
                     + Nouveau Devis
                 </button>
             </div>
@@ -44,62 +42,61 @@
                 <input type="text" id="searchBar" oninput="refreshUI()" placeholder="Rechercher..." class="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-xl text-sm">
             </div>
             
-            <div class="flex gap-8 border-x px-8 border-slate-200">
+            <div class="flex gap-10 border-x px-10 border-slate-100">
                 <div class="text-center">
-                    <p class="text-[9px] font-bold text-slate-400 uppercase">Pipeline Attente</p>
-                    <p class="text-lg font-black text-indigo-600" id="statPending">0€</p>
+                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">En cours</p>
+                    <p class="text-xl font-black text-indigo-600" id="statPending">0€</p>
                 </div>
                 <div class="text-center">
-                    <p class="text-[9px] font-bold text-slate-400 uppercase">CA Gagné</p>
-                    <p class="text-lg font-black text-emerald-600" id="statWon">0€</p>
+                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">CA Gagné</p>
+                    <p class="text-xl font-black text-emerald-600" id="statWon">0€</p>
                 </div>
                 <div class="text-center">
-                    <p class="text-[9px] font-bold text-slate-400 uppercase">Taux Conv.</p>
-                    <p class="text-lg font-black text-slate-800" id="statConv">0%</p>
+                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Conversion</p>
+                    <p class="text-xl font-black text-slate-800" id="statConv">0%</p>
                 </div>
             </div>
 
             <div class="flex items-center gap-4">
-                <input type="date" id="filterStart" onchange="refreshUI()" class="text-xs border rounded-md p-1 bg-slate-50">
+                <input type="date" id="filterStart" onchange="refreshUI()" class="text-xs border rounded-md p-1 bg-slate-50 text-slate-600">
                 <span class="text-slate-300">→</span>
-                <input type="date" id="filterEnd" onchange="refreshUI()" class="text-xs border rounded-md p-1 bg-slate-50">
+                <input type="date" id="filterEnd" onchange="refreshUI()" class="text-xs border rounded-md p-1 bg-slate-50 text-slate-600">
             </div>
         </div>
     </div>
 
     <main id="main-content" class="p-6 kanban-view overflow-x-auto">
-        <div class="flex gap-4 min-w-max h-full">
+        <div class="flex gap-5 min-w-max h-full">
             <div class="col-group"><div class="col-header">NOUVEAU <span class="cnt" id="cnt-new">0</span></div><div id="new" class="kanban-list" data-status="new"></div></div>
             <div class="col-group"><div class="col-header">ATTENTE CONF. <span class="cnt" id="cnt-progress">0</span></div><div id="progress" class="kanban-list" data-status="progress"></div></div>
-            <div class="col-group bg-amber-50/50"><div class="col-header text-amber-600">🚨 À RELANCER <span class="cnt bg-amber-500" id="cnt-urgent">0</span></div><div id="urgent" class="kanban-list" data-status="urgent"></div></div>
-            <div class="col-group bg-emerald-50/50"><div class="col-header text-emerald-600">🎯 GAGNÉ <span class="cnt bg-emerald-500" id="cnt-won">0</span></div><div id="won" class="kanban-list" data-status="won"></div></div>
-            <div class="col-group opacity-60"><div class="col-header text-slate-400">ANNULÉ / PERDU <span class="cnt" id="cnt-lost">0</span></div><div id="lost" class="kanban-list" data-status="lost"></div></div>
+            <div class="col-group bg-amber-50/50 border border-amber-100"><div class="col-header text-amber-600">🚨 À RELANCER <span class="cnt bg-amber-500" id="cnt-urgent">0</span></div><div id="urgent" class="kanban-list" data-status="urgent"></div></div>
+            <div class="col-group bg-emerald-50/50 border border-emerald-100"><div class="col-header text-emerald-600">🎯 GAGNÉ <span class="cnt bg-emerald-500" id="cnt-won">0</span></div><div id="won" class="kanban-list" data-status="won"></div></div>
+            <div class="col-group opacity-60 grayscale"><div class="col-header text-slate-400">ANNULÉ <span class="cnt" id="cnt-lost">0</span></div><div id="lost" class="kanban-list" data-status="lost"></div></div>
         </div>
     </main>
 
     <div id="modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[100] p-4">
         <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col scale-in overflow-hidden">
             <div class="p-6 border-b flex justify-between items-center bg-slate-50">
-                <h2 class="text-xl font-bold">Fiche Devis</h2>
-                <button onclick="closeModal()" class="text-slate-400 text-2xl">&times;</button>
+                <h2 class="text-xl font-bold text-slate-800">Dossier Client</h2>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 transition-colors text-2xl">&times;</button>
             </div>
-            <form id="clientForm" class="p-8 grid grid-cols-2 gap-4 overflow-y-auto max-h-[70vh]">
+            <form id="clientForm" class="p-8 grid grid-cols-2 gap-5 overflow-y-auto max-h-[70vh]">
                 <div class="col-span-2"><label class="lbl">Entreprise</label><input type="text" id="f-entreprise" class="inp" required></div>
                 <div><label class="lbl">Contact</label><input type="text" id="f-contact" class="inp"></div>
                 <div><label class="lbl">Email</label><input type="email" id="f-email" class="inp"></div>
                 <div><label class="lbl">Téléphone</label><input type="text" id="f-tel" class="inp"></div>
-                <div><label class="lbl">Priorité</label><select id="f-priorite" class="inp"><option>P1</option><option selected>P2</option><option>P3</option></select></div>
-                <div><label class="lbl">Prix Devis (€)</label><input type="number" step="0.01" id="f-prix" class="inp"></div>
+                <div><label class="lbl">Prix estimé (€)</label><input type="number" step="0.01" id="f-prix" class="inp"></div>
                 <div><label class="lbl">Date Événement</label><input type="date" id="f-dateE" class="inp"></div>
-                <div><label class="lbl">Prochaine Relance</label><input type="date" id="f-dateR" class="inp border-indigo-200"></div>
-                <div><label class="lbl">Nb Relances</label><input type="number" id="f-nbRelances" class="inp" value="0"></div>
-                <div class="col-span-2"><label class="lbl">Notes / Historique</label><textarea id="f-infos" rows="3" class="inp"></textarea></div>
+                <div><label class="lbl">Date Prochaine Relance</label><input type="date" id="f-dateR" class="inp border-indigo-100 bg-indigo-50/20"></div>
+                <div><label class="lbl">Nombre de relances</label><input type="number" id="f-nbRelances" class="inp" value="0"></div>
+                <div class="col-span-2"><label class="lbl">Notes & Historique</label><textarea id="f-infos" rows="3" class="inp" placeholder="Détails du devis, appels passés..."></textarea></div>
             </form>
-            <div class="p-6 border-t flex justify-between bg-slate-50">
+            <div class="p-6 border-t flex justify-between items-center bg-slate-50">
                 <button onclick="deleteClient()" class="text-rose-500 font-bold text-xs uppercase hover:underline">Supprimer</button>
                 <div class="flex gap-3">
                     <button onclick="closeModal()" class="px-6 py-2 font-bold text-slate-500">Annuler</button>
-                    <button onclick="saveClient()" class="bg-indigo-600 text-white px-8 py-2 rounded-xl font-bold">Enregistrer</button>
+                    <button onclick="saveClient()" id="btnSave" class="bg-indigo-600 text-white px-8 py-2.5 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">Enregistrer</button>
                 </div>
             </div>
         </div>
