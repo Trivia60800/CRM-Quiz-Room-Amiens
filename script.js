@@ -78,7 +78,6 @@ function computeNextRelance(client) {
   const monthlyStr = monthlyBase.toISOString().split('T')[0];
   return monthlyStr > TODAY ? monthlyStr : null;
 }
-}
 
 /**
  * Retourne un label lisible pour la prochaine relance depuis une carte
