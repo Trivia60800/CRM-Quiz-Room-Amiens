@@ -5,11 +5,11 @@ function verifyAccess() {
     let access = sessionStorage.getItem('qr_amiens_auth');
     
     while (access !== 'ok') {
-        const mdp = prompt("Veuillez saisir le mot de passe (Indice: AMIENS2026) :");
+        const mdp = prompt("Veuillez saisir le mot de passe (Indice: Quiz Room Amiens) :");
         
         if (mdp === null) return; // Si l'utilisateur clique sur Annuler
 
-        if (mdp === "AMIENS2026") {
+        if (mdp === "QRAmiens") {
             sessionStorage.setItem('qr_amiens_auth', 'ok');
             access = 'ok';
         } else {
