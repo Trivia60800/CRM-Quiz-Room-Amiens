@@ -53,60 +53,31 @@ const STATUSES = ['new', 'progress', 'urgent', 'won', 'lost'];
  */
 function computeNextRelance(client) {
   const dateC = client.dateC || TODAY;
-  const dateE = client.dateE || null;
-  const n     = client.nbRelances || 0; // nombre de relances déjà faites
+  const n     = client.nbRelances || 0;
 
-  const today   = new Date(TODAY);
   const created = new Date(dateC);
 
-  // ---- MODE REBOURS (événement dans < 30j) ----
-  if (dateE) {
-    const event    = new Date(dateE + 'T12:00:00');
-    const daysToEvent = Math.ceil((event - today) / 86400000);
-    const MIN_BEFORE = 3; // jamais dans les 3j précédant l'événement
-
-    if (daysToEvent <= 30 && daysToEvent > MIN_BEFORE) {
-      // Jalons à rebours : J-21, J-14, J-7, J-3
-      const rebroussJalons = [21, 14, 7, 3];
-      for (let j of rebroussJalons) {
-        if (j <= MIN_BEFORE) break;
-        const jalDate = new Date(dateE + 'T12:00:00');
-        jalDate.setDate(jalDate.getDate() - j);
-        const jalStr = jalDate.toISOString().split('T')[0];
-        if (jalStr > TODAY) return jalStr; // premier jalon futur
-      }
-      // Tous les jalons sont passés et on est encore à > 3j → pas de relance avant l'événement
-      return null;
-    }
-
-    // Événement déjà passé ou > 30j → mode création
-  }
-
-  // ---- MODE CRÉATION (événement lointain ou absent) ----
-  const jalonsCreation = [3, 7, 14, 30];
-  for (let i = 0; i < jalonsCreation.length; i++) {
+  // Jalons fixes depuis la date de création : J+3, J+7, J+14, J+30
+  const jalons = [3, 7, 14, 30];
+  for (let i = 0; i < jalons.length; i++) {
     if (i >= n) {
       const target = new Date(created);
-      target.setDate(target.getDate() + jalonsCreation[i]);
+      target.setDate(target.getDate() + jalons[i]);
       const targetStr = target.toISOString().split('T')[0];
       if (targetStr > TODAY) return targetStr;
     }
   }
-  // Au-delà de J+30 : relance mensuelle
+
+  // Au-delà de J+30 : relance mensuelle (+30j à chaque fois)
   const monthlyBase = new Date(created);
   monthlyBase.setDate(monthlyBase.getDate() + 30);
-  const extraMonths = n - jalonsCreation.length + 1;
+  const extraMonths = n - jalons.length + 1;
   if (extraMonths > 0) {
     monthlyBase.setMonth(monthlyBase.getMonth() + extraMonths);
   }
-  // Vérifier que la prochaine mensuelle ne tombe pas trop proche de l'événement
-  if (dateE) {
-    const event = new Date(dateE + 'T12:00:00');
-    const diff  = Math.ceil((event - monthlyBase) / 86400000);
-    if (diff <= 3) return null; // trop proche de l'événement
-  }
   const monthlyStr = monthlyBase.toISOString().split('T')[0];
   return monthlyStr > TODAY ? monthlyStr : null;
+}
 }
 
 /**
