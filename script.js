@@ -1,7 +1,12 @@
-let clients = JSON.parse(localStorage.getItem('qr_amiens_crm')) || [];
+// INITIALISATION SUPABASE
+const supabaseUrl = 'https://sdtgzlrwsrmhsvoztdat.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkdGd6bHJ3c3JtaHN2b3p0ZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxODgwMjksImV4cCI6MjA4Nzc2NDAyOX0.DZYgBhijp71scgO1fTAte5e536WsDaMb9zTFE_eoa8k';
+const _supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+let clients = [];
 let currentId = null;
 
-// --- GESTION DES JOURS OUVRÉS ---
+// GESTION DES JOURS OUVRÉS
 function addBusinessDays(date, days) {
     let result = new Date(date);
     let added = 0;
@@ -18,49 +23,17 @@ function getNextRelanceDate(count) {
     return addBusinessDays(new Date(), days);
 }
 
-// --- IMPORT CSV ---
-function handleCSV(event) {
-    const file = event.target.files[0];
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const text = e.target.result;
-        const rows = text.split('\n').slice(1); // On ignore l'en-tête
-        
-        rows.forEach(row => {
-            if (!row.trim()) return;
-            const cols = row.split(';'); // Format CSV Français souvent en ";"
-            const newClient = {
-                id: Date.now() + Math.random(),
-                entreprise: cols[0] || "Sans nom",
-                contact: cols[1] || "",
-                email: cols[2] || "",
-                tel: cols[3] || "",
-                prix: parseFloat(cols[4]) || 0,
-                status: 'new',
-                nbRelances: 0,
-                dateC: new Date().toISOString().split('T')[0],
-                dateR: getNextRelanceDate(0)
-            };
-            clients.push(newClient);
-        });
+// CHARGEMENT INITIAL
+async function loadData() {
+    const { data, error } = await _supabase.from('clients').select('*');
+    if (error) console.error(error);
+    else {
+        clients = data;
         refreshUI();
-        alert("Importation terminée !");
-    };
-    reader.readAsText(file);
+    }
 }
 
-// --- EXPORT SAUVEGARDE ---
-function exportBackup() {
-    const data = JSON.stringify(clients);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `backup-crm-amiens-${new Date().toLocaleDateString()}.json`;
-    a.click();
-}
-
-// --- RENDU ---
+// MISE À JOUR UI
 function refreshUI() {
     const today = new Date().toISOString().split('T')[0];
     const search = document.getElementById('searchBar').value.toLowerCase();
@@ -87,9 +60,9 @@ function refreshUI() {
             if (status === 'won') { caWon += prix; countWon++; }
             if (status === 'lost') countLost++;
 
+            // Auto-Urgent
             if (c.dateR && c.dateR <= today && (status === 'new' || status === 'progress')) {
-                c.status = 'urgent';
-                setTimeout(refreshUI, 0);
+                updateStatus(c.id, 'urgent');
             }
 
             const card = document.createElement('div');
@@ -97,20 +70,20 @@ function refreshUI() {
             card.setAttribute('data-id', c.id);
             card.innerHTML = `
                 <div class="flex justify-between items-start">
-                    <span class="text-[9px] font-black text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">${c.entreprise}</span>
-                    <span class="text-xs font-black text-indigo-600">${prix.toLocaleString()}€</span>
+                    <span class="text-[9px] font-black text-slate-400 uppercase bg-slate-100 px-2 py-1 rounded-md tracking-wider">${c.entreprise}</span>
+                    <span class="text-sm font-black text-indigo-600">${prix.toLocaleString()}€</span>
                 </div>
-                <div class="text-sm font-bold text-slate-800 mt-1">${c.contact || 'N/C'}</div>
-                <div class="text-[10px] text-slate-400 mt-1">${c.email || ''}</div>
-                <div class="mt-3 flex items-center justify-between text-[9px] font-bold">
-                    <div class="text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded">#${c.nbRelances} relance(s)</div>
-                    <div class="${c.dateR <= today && status !== 'won' ? 'text-rose-500' : 'text-slate-400'}">
-                        <i class="fa-regular fa-bell mr-1"></i>${c.dateR || '--'}
+                <div class="text-sm font-extrabold text-slate-800 mt-2">${c.contact || 'Inconnu'}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5">${c.email || ''}</div>
+                <div class="mt-4 flex items-center justify-between">
+                    <div class="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">Relances : ${c.nbRelances}</div>
+                    <div class="text-[9px] font-bold ${c.dateR <= today && status !== 'won' ? 'text-rose-500 animate-pulse' : 'text-slate-400'}">
+                        <i class="fa-regular fa-clock mr-1"></i>${c.dateR || '--'}
                     </div>
                 </div>
                 <div class="actions">
-                    ${status === 'urgent' ? `<button onclick="doRelance(${c.id}, event)" class="flex-1 bg-indigo-600 text-white text-[9px] font-bold py-2 rounded-lg uppercase">Relancé</button>` : ''}
-                    <button onclick="updateStatus(${c.id}, 'won', event)" class="flex-1 bg-emerald-500 text-white text-[9px] font-bold py-2 rounded-lg uppercase">Gagné</button>
+                    ${status === 'urgent' ? `<button onclick="doRelance(${c.id}, event)" class="flex-1 bg-indigo-600 text-white text-[9px] font-black py-2 rounded-lg uppercase tracking-widest">Relancé</button>` : ''}
+                    <button onclick="updateStatus(${c.id}, 'won', event)" class="flex-1 bg-emerald-500 text-white text-[9px] font-black py-2 rounded-lg uppercase tracking-widest">Signé</button>
                 </div>
             `;
             card.onclick = () => openEditModal(c.id);
@@ -122,21 +95,92 @@ function refreshUI() {
     document.getElementById('statWon').innerText = caWon.toLocaleString() + "€";
     const total = countWon + countLost;
     document.getElementById('statConv').innerText = total > 0 ? Math.round((countWon / total) * 100) + "%" : "0%";
-    localStorage.setItem('qr_amiens_crm', JSON.stringify(clients));
 }
 
-// --- ACTIONS ---
-function doRelance(id, e) {
+// ACTIONS SUPABASE
+async function saveClient() {
+    const btn = document.getElementById('btnSave');
+    btn.disabled = true; btn.innerText = "Enregistrement...";
+
+    const data = {
+        entreprise: document.getElementById('f-entreprise').value,
+        contact: document.getElementById('f-contact').value,
+        email: document.getElementById('f-email').value,
+        tel: document.getElementById('f-tel').value,
+        prix: parseFloat(document.getElementById('f-prix').value) || 0,
+        nbRelances: parseInt(document.getElementById('f-nbRelances').value) || 0,
+        dateR: document.getElementById('f-dateR').value || null,
+        dateE: document.getElementById('f-dateE').value || null,
+        infos: document.getElementById('f-infos').value
+    };
+
+    if (currentId) {
+        await _supabase.from('clients').update(data).eq('id', currentId);
+    } else {
+        data.status = 'new';
+        data.dateC = new Date().toISOString().split('T')[0];
+        if(!data.dateR) data.dateR = getNextRelanceDate(0);
+        await _supabase.from('clients').insert([data]);
+    }
+
+    closeModal();
+    btn.disabled = false; btn.innerText = "Enregistrer";
+    loadData();
+}
+
+async function updateStatus(id, stat, e) {
+    if(e) e.stopPropagation();
+    await _supabase.from('clients').update({ status: stat }).eq('id', id);
+    loadData();
+}
+
+async function doRelance(id, e) {
     e.stopPropagation();
     const c = clients.find(x => x.id === id);
-    c.nbRelances++;
-    c.status = 'progress';
-    c.dateR = getNextRelanceDate(c.nbRelances);
-    refreshUI();
+    const n = (c.nbRelances || 0) + 1;
+    await _supabase.from('clients').update({ 
+        status: 'progress', 
+        nbRelances: n,
+        dateR: getNextRelanceDate(n)
+    }).eq('id', id);
+    loadData();
 }
 
-function updateStatus(id, stat, e) { if(e) e.stopPropagation(); clients.find(x => x.id === id).status = stat; refreshUI(); }
+async function deleteClient() {
+    if(confirm("Supprimer définitivement ?")) {
+        await _supabase.from('clients').delete().eq('id', currentId);
+        closeModal();
+        loadData();
+    }
+}
 
+// CSV IMPORT
+async function handleCSV(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const rows = e.target.result.split('\n').slice(1);
+        const toInsert = rows.map(row => {
+            if (!row.trim()) return null;
+            const cols = row.split(';');
+            return {
+                entreprise: cols[0] || "Client",
+                contact: cols[1] || "",
+                email: cols[2] || "",
+                tel: cols[3] || "",
+                prix: parseFloat(cols[4]) || 0,
+                status: 'new',
+                dateC: new Date().toISOString().split('T')[0],
+                dateR: getNextRelanceDate(0)
+            };
+        }).filter(x => x);
+        await _supabase.from('clients').insert(toInsert);
+        loadData();
+    };
+    reader.readAsText(file);
+}
+
+// MODALE & UI
 function openEditModal(id) {
     currentId = id;
     const c = clients.find(x => x.id === id);
@@ -154,41 +198,19 @@ function openEditModal(id) {
 
 function openAddModal() { currentId = null; document.getElementById('clientForm').reset(); document.getElementById('modal').classList.remove('hidden'); }
 function closeModal() { document.getElementById('modal').classList.add('hidden'); }
-function deleteClient() { if(confirm("Supprimer ce dossier ?")) { clients = clients.filter(x => x.id !== currentId); closeModal(); refreshUI(); } }
-
-function saveClient() {
-    const data = {
-        entreprise: document.getElementById('f-entreprise').value,
-        contact: document.getElementById('f-contact').value,
-        email: document.getElementById('f-email').value,
-        tel: document.getElementById('f-tel').value,
-        prix: parseFloat(document.getElementById('f-prix').value) || 0,
-        nbRelances: parseInt(document.getElementById('f-nbRelances').value) || 0,
-        dateR: document.getElementById('f-dateR').value,
-        dateE: document.getElementById('f-dateE').value,
-        infos: document.getElementById('f-infos').value
-    };
-    if (currentId) {
-        const idx = clients.findIndex(x => x.id === currentId);
-        clients[idx] = { ...clients[idx], ...data };
-    } else {
-        data.id = Date.now();
-        data.status = 'new';
-        data.dateC = new Date().toISOString().split('T')[0];
-        if(!data.dateR) data.dateR = getNextRelanceDate(0);
-        clients.push(data);
-    }
-    closeModal();
-    refreshUI();
+function setView(v) { 
+    document.getElementById('main-content').className = 'p-6 ' + v + '-view';
+    document.getElementById('btn-kanban').classList.toggle('active', v === 'kanban');
+    document.getElementById('btn-list').classList.toggle('active', v === 'list');
 }
 
 // Drag & Drop
 ['new', 'progress', 'urgent', 'won', 'lost'].forEach(s => {
-    new Sortable(document.getElementById(s), { group: 'crm', animation: 150, onEnd: (e) => {
+    new Sortable(document.getElementById(s), { group: 'crm', animation: 150, onEnd: async (e) => {
         const id = e.item.getAttribute('data-id');
-        clients.find(x => x.id == id).status = e.to.id;
-        refreshUI();
+        await _supabase.from('clients').update({ status: e.to.id }).eq('id', id);
+        loadData();
     }});
 });
 
-refreshUI();
+loadData();
