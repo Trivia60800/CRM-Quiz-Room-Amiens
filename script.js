@@ -1,5 +1,5 @@
 // ==========================================
-// CONFIG & INIT
+// CONFIG & AUTH
 // ==========================================
 const CONFIG = {
   URL:       'https://sdtgzlrwsrmhsvoztdat.supabase.co',
@@ -9,7 +9,6 @@ const CONFIG = {
 
 const _sb = supabase.createClient(CONFIG.URL, CONFIG.ANON_KEY);
 
-// Simple auth
 (function () {
   if (sessionStorage.getItem('qr_auth') !== 'ok') {
     const p = prompt('Accès CRM Quiz Room Amiens :');
@@ -25,14 +24,14 @@ const _sb = supabase.createClient(CONFIG.URL, CONFIG.ANON_KEY);
 // ==========================================
 // STATE
 // ==========================================
-let clients        = [];
-let currentId      = null;
+let clients          = [];
+let currentId        = null;
 let currentRelanceId = null;
-let relanceMoyen   = null;
-let currentView    = 'kanban';
-let activeFilter   = 'all';
-let sortCol        = null;
-let sortAsc        = true;
+let relanceMoyen     = null;
+let currentView      = 'kanban';
+let activeFilter     = 'all';
+let sortCol          = null;
+let sortAsc          = true;
 let sortableInstances = [];
 
 const TODAY    = new Date().toISOString().split('T')[0];
@@ -52,7 +51,7 @@ function addBusinessDays(date, days) {
 }
 
 function fmt(val) {
-  return (parseFloat(val) || 0).toLocaleString('fr-FR') + '€';
+  return (parseFloat(val) || 0).toLocaleString('fr-FR') + ' €';
 }
 
 function daysDiff(dateStr) {
@@ -61,19 +60,26 @@ function daysDiff(dateStr) {
 }
 
 function toast(msg, type = 'success') {
-  const t    = document.getElementById('toast');
-  const icon = document.getElementById('toast-icon');
+  const t     = document.getElementById('toast');
+  const icon  = document.getElementById('toast-icon');
   const msgEl = document.getElementById('toast-msg');
-
-  const icons = { success: 'fa-check', error: 'fa-xmark', info: 'fa-info' };
+  const icons  = { success: 'fa-check-circle', error: 'fa-xmark-circle', info: 'fa-info-circle' };
   const colors = { success: 'var(--won)', error: 'var(--urgent)', info: 'var(--accent)' };
-
-  icon.className   = `fa-solid ${icons[type] || icons.success}`;
-  icon.style.color = colors[type] || colors.success;
+  icon.className    = `fa-solid ${icons[type] || icons.success}`;
+  icon.style.color  = colors[type] || colors.success;
   msgEl.textContent = msg;
-
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2800);
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function showImportLoader(msg) {
+  const el = document.getElementById('import-loader');
+  document.getElementById('import-msg').textContent = msg || 'Import en cours…';
+  el.classList.add('show');
+}
+
+function hideImportLoader() {
+  document.getElementById('import-loader').classList.remove('show');
 }
 
 // ==========================================
@@ -90,6 +96,7 @@ async function loadData() {
     refreshUI();
     updateNotifications();
   } else {
+    console.error('Supabase error:', error);
     toast('Erreur chargement données', 'error');
   }
 }
@@ -103,12 +110,10 @@ function getFiltered() {
   const dateTo   = document.getElementById('filterDateTo').value;
 
   return clients.filter(c => {
-    // Recherche texte
     if (search) {
       const hay = (c.entreprise + ' ' + (c.contact || '')).toLowerCase();
       if (!hay.includes(search)) return false;
     }
-    // Filtre statut
     if (activeFilter !== 'all') {
       const isOverdue = c.dateR && c.dateR <= TODAY && c.status !== 'won' && c.status !== 'lost';
       if (activeFilter === 'urgent') {
@@ -118,7 +123,6 @@ function getFiltered() {
         if (isOverdue && activeFilter !== 'urgent') return false;
       }
     }
-    // Filtre dates événement
     if (dateFrom && c.dateE && c.dateE < dateFrom) return false;
     if (dateTo   && c.dateE && c.dateE > dateTo)   return false;
     return true;
@@ -145,9 +149,6 @@ function setFilter(f) {
   refreshUI();
 }
 
-// ==========================================
-// REFRESH UI
-// ==========================================
 function refreshUI() {
   if (currentView === 'kanban') renderKanban();
   else                          renderList();
@@ -171,7 +172,6 @@ function renderKanban() {
       if (search && !(c.entreprise + ' ' + (c.contact || '')).toLowerCase().includes(search)) return false;
       if (dateFrom && c.dateE && c.dateE < dateFrom) return false;
       if (dateTo   && c.dateE && c.dateE > dateTo)   return false;
-
       const isOverdue = c.dateR && c.dateR <= TODAY && c.status !== 'won' && c.status !== 'lost';
       if (status === 'urgent')   return isOverdue || c.status === 'urgent';
       if (status === 'new' || status === 'progress') return c.status === status && !isOverdue;
@@ -182,28 +182,30 @@ function renderKanban() {
 
     items.forEach(c => {
       const diff = daysDiff(c.dateR);
-      let timeLabel = c.dateR ? new Date(c.dateR).toLocaleDateString('fr-FR') : '--';
+      let timeLabel = c.dateR ? new Date(c.dateR + 'T12:00:00').toLocaleDateString('fr-FR') : '—';
       let timeClass = '';
-      if (diff === 0)                   { timeLabel = "AUJOURD'HUI"; timeClass = 'today'; }
-      else if (diff !== null && diff < 0) { timeLabel = `RETARD ${Math.abs(diff)}J`; timeClass = 'overdue'; }
+      if (diff === 0)                     { timeLabel = "Aujourd'hui"; timeClass = 'today'; }
+      else if (diff !== null && diff < 0) { timeLabel = `Retard ${Math.abs(diff)}j`; timeClass = 'overdue'; }
 
       const card = document.createElement('div');
       card.className = 'card';
       card.setAttribute('data-id', c.id);
       card.innerHTML = `
-        <div class="card-company">${c.entreprise}</div>
-        <div class="card-contact">${c.contact || 'N/C'}</div>
-        <div class="card-price">${fmt(c.prix)}</div>
+        <div class="card-top">
+          <span class="card-company">${escHtml(c.entreprise)}</span>
+          <span class="card-price">${fmt(c.prix)}</span>
+        </div>
+        <div class="card-contact">${escHtml(c.contact || 'N/C')}</div>
         <div class="card-meta">
           <span class="relance-badge">
-            <i class="fa-solid fa-rotate-right" style="font-size:8px;margin-right:4px"></i>
+            <i class="fa-solid fa-rotate-right" style="font-size:8px"></i>
             ${c.nbRelances || 0} relance${(c.nbRelances || 0) > 1 ? 's' : ''}
           </span>
           <span class="date-badge ${timeClass}">${timeLabel}</span>
         </div>
         <div class="card-actions">
-          <button class="card-btn script"  onclick="copyScript(${c.id}, event)">SCRIPT</button>
-          <button class="card-btn relance" onclick="openRelanceModal(${c.id}, event)">RELANCÉ</button>
+          <button class="card-btn script"  onclick="copyScript(${c.id}, event)">Script</button>
+          <button class="card-btn relance" onclick="openRelanceModal(${c.id}, event)">Relancé</button>
         </div>
       `;
       card.onclick = () => openEditModal(c.id);
@@ -235,7 +237,7 @@ function renderList() {
   tbody.innerHTML = '';
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:40px">Aucun résultat</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:40px;font-size:13px">Aucun résultat</td></tr>`;
     return;
   }
 
@@ -246,23 +248,22 @@ function renderList() {
     const isOverdue     = c.dateR && c.dateR <= TODAY && c.status !== 'won' && c.status !== 'lost';
     const displayStatus = isOverdue ? 'urgent' : c.status;
     const diff          = daysDiff(c.dateR);
-
-    let relLabel = c.dateR ? new Date(c.dateR).toLocaleDateString('fr-FR') : '--';
-    if (diff === 0)                   relLabel = "AUJOURD'HUI";
-    else if (diff !== null && diff < 0) relLabel = `RETARD ${Math.abs(diff)}J`;
+    let relLabel        = c.dateR ? new Date(c.dateR + 'T12:00:00').toLocaleDateString('fr-FR') : '—';
+    if (diff === 0)                     relLabel = "Aujourd'hui";
+    else if (diff !== null && diff < 0) relLabel = `Retard ${Math.abs(diff)}j`;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="font-weight:700">${c.entreprise}</td>
-      <td>${c.contact || '--'}</td>
-      <td style="font-family:var(--font-head);font-weight:800;color:var(--accent)">${fmt(c.prix)}</td>
+      <td style="font-weight:600">${escHtml(c.entreprise)}</td>
+      <td style="color:var(--muted)">${escHtml(c.contact || '—')}</td>
+      <td style="font-family:var(--font-head);font-weight:700;color:var(--accent)">${fmt(c.prix)}</td>
       <td><span class="status-pill ${pillClass[displayStatus]}">${statusLabels[displayStatus]}</span></td>
-      <td style="color:${diff !== null && diff <= 0 ? 'var(--urgent)' : 'var(--muted)'};font-size:12px">${relLabel}</td>
-      <td style="color:var(--muted);font-size:12px">${c.dateE ? new Date(c.dateE).toLocaleDateString('fr-FR') : '--'}</td>
-      <td style="color:var(--muted);font-size:12px">${c.nbRelances || 0}</td>
+      <td style="color:${diff !== null && diff <= 0 ? 'var(--urgent)' : 'var(--muted)'};font-size:12px;font-weight:${diff !== null && diff <= 0 ? '700':'400'}">${relLabel}</td>
+      <td style="color:var(--muted);font-size:12px">${c.dateE ? new Date(c.dateE + 'T12:00:00').toLocaleDateString('fr-FR') : '—'}</td>
+      <td style="color:var(--muted);font-size:12px;text-align:center">${c.nbRelances || 0}</td>
       <td>
-        <button class="card-btn relance" style="padding:6px 12px;font-size:9px;border-radius:8px"
-          onclick="openRelanceModal(${c.id}, event)">RELANCÉ</button>
+        <button class="card-btn relance" style="padding:6px 14px;font-size:10px;border-radius:8px;white-space:nowrap"
+          onclick="openRelanceModal(${c.id}, event)">Relancé</button>
       </td>
     `;
     tr.onclick = () => openEditModal(c.id);
@@ -281,7 +282,6 @@ function sortList(col) {
 // ==========================================
 function updateStats() {
   let pending = 0, won = 0, cWon = 0, cLost = 0, due = 0;
-
   clients.forEach(c => {
     const p = parseFloat(c.prix) || 0;
     if (c.status === 'won')       { won += p; cWon++; }
@@ -289,13 +289,11 @@ function updateStats() {
     else                          { pending += p; }
     if (c.dateR && c.dateR <= TODAY && c.status !== 'won' && c.status !== 'lost') due++;
   });
-
-  document.getElementById('statPending').textContent = pending.toLocaleString('fr-FR') + '€';
-  document.getElementById('statWon').textContent     = won.toLocaleString('fr-FR') + '€';
+  document.getElementById('statPending').textContent = pending.toLocaleString('fr-FR') + ' €';
+  document.getElementById('statWon').textContent     = won.toLocaleString('fr-FR') + ' €';
   document.getElementById('statDue').textContent     = due;
-
   const total = cWon + cLost;
-  document.getElementById('statConv').textContent = total > 0 ? Math.round(cWon / total * 100) + '%' : '0%';
+  document.getElementById('statConv').textContent = total > 0 ? Math.round(cWon / total * 100) + ' %' : '0 %';
 }
 
 // ==========================================
@@ -307,22 +305,14 @@ function updateNotifications() {
     .sort((a, b) => (a.dateR || '') < (b.dateR || '') ? -1 : 1);
 
   const badge = document.getElementById('notif-badge');
-  if (overdue.length > 0) {
-    badge.textContent  = overdue.length;
-    badge.style.display = 'flex';
-  } else {
-    badge.style.display = 'none';
-  }
+  badge.textContent   = overdue.length;
+  badge.style.display = overdue.length > 0 ? 'flex' : 'none';
 
   const list = document.getElementById('notif-list');
   list.innerHTML = '';
 
   if (overdue.length === 0) {
-    list.innerHTML = `
-      <div class="notif-empty">
-        <i class="fa-solid fa-check-circle" style="color:var(--won);margin-bottom:8px;font-size:20px;display:block"></i>
-        Toutes les relances sont à jour !
-      </div>`;
+    list.innerHTML = `<div class="notif-empty"><i class="fa-solid fa-circle-check" style="color:var(--won);font-size:22px;display:block;margin-bottom:8px"></i>Toutes les relances sont à jour !</div>`;
     return;
   }
 
@@ -331,9 +321,9 @@ function updateNotifications() {
     const item = document.createElement('div');
     item.className = 'notif-item';
     item.innerHTML = `
-      <span class="notif-item-badge">RETARD ${Math.abs(diff)}J</span>
-      <div class="notif-item-company">${c.entreprise}</div>
-      <div class="notif-item-detail">${c.contact || ''} · ${fmt(c.prix)}</div>
+      <span class="notif-item-badge">Retard ${Math.abs(diff)}j</span>
+      <div class="notif-item-company">${escHtml(c.entreprise)}</div>
+      <div class="notif-item-detail">${escHtml(c.contact || '')}${c.contact ? ' · ' : ''}${fmt(c.prix)}</div>
     `;
     item.onclick = () => { openEditModal(c.id); toggleNotifPanel(); };
     list.appendChild(item);
@@ -355,8 +345,7 @@ function initSortable() {
   STATUSES.forEach(status => {
     const el = document.getElementById('list-' + status);
     if (!el) return;
-
-    const instance = Sortable.create(el, {
+    sortableInstances.push(Sortable.create(el, {
       group:      'kanban',
       animation:  200,
       ghostClass: 'sortable-ghost',
@@ -367,8 +356,7 @@ function initSortable() {
         if (newStatus === evt.from.id.replace('list-', '')) return;
         await moveCard(id, newStatus);
       }
-    });
-    sortableInstances.push(instance);
+    }));
   });
 }
 
@@ -377,7 +365,8 @@ async function moveCard(id, newStatus) {
   if (!error) {
     const c = clients.find(x => x.id === id);
     if (c) c.status = newStatus;
-    toast(`Déplacé vers "${newStatus}"`, 'info');
+    const labels = { new:'Nouveaux', progress:'En cours', urgent:'À relancer', won:'Gagné', lost:'Perdu' };
+    toast(`Déplacé vers « ${labels[newStatus] || newStatus} »`, 'info');
     refreshUI();
     updateNotifications();
   } else {
@@ -411,7 +400,6 @@ function selectRelanceOption(el) {
 
 async function confirmRelance() {
   if (!relanceMoyen) { toast('Choisissez un moyen de relance', 'error'); return; }
-
   const c = clients.find(x => x.id === currentRelanceId);
   if (!c) return;
 
@@ -420,19 +408,16 @@ async function confirmRelance() {
   const steps    = [3, 5, 10];
   const nextDate = addBusinessDays(new Date(), steps[n - 1] || 15);
   const dateJour = new Date().toLocaleDateString('fr-FR');
-
-  let log = `[${dateJour}] Relance par ${relanceMoyen}`;
+  let log        = `[${dateJour}] Relance par ${relanceMoyen}`;
   if (note) log += ` : ${note}`;
 
   const { error } = await _sb.from('clients').update({
-    status:     'progress',
-    nbRelances: n,
-    dateR:      nextDate,
-    infos:      log + '\n' + (c.infos || '')
+    status: 'progress', nbRelances: n, dateR: nextDate,
+    infos: log + '\n' + (c.infos || '')
   }).eq('id', currentRelanceId);
 
   if (!error) {
-    toast(`Relance enregistrée — prochaine le ${new Date(nextDate).toLocaleDateString('fr-FR')}`, 'success');
+    toast(`Relance enregistrée — prochaine le ${new Date(nextDate + 'T12:00:00').toLocaleDateString('fr-FR')}`, 'success');
     closeRelanceModal();
     loadData();
   } else {
@@ -447,7 +432,7 @@ function copyScript(id, e) {
   if (e) e.stopPropagation();
   const c = clients.find(x => x.id === id);
   const texte = `Bonjour ${c.contact || c.entreprise},\n\nJe reviens vers vous concernant votre projet Quiz Room Amiens (${fmt(c.prix)}).\n\nAvez-vous pu en discuter en interne ?\n\nÀ très bientôt !`;
-  navigator.clipboard.writeText(texte).then(() => toast('Script copié !', 'success'));
+  navigator.clipboard.writeText(texte).then(() => toast('Script copié dans le presse-papier !', 'success'));
 }
 
 // ==========================================
@@ -457,10 +442,10 @@ function openAddModal() {
   currentId = null;
   document.getElementById('modal-title').textContent = 'Nouveau dossier';
   ['f-entreprise','f-contact','f-email','f-tel','f-infos'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('f-prix').value      = '0';
-  document.getElementById('f-status').value    = 'new';
-  document.getElementById('f-dateE').value     = '';
-  document.getElementById('f-dateR').value     = '';
+  document.getElementById('f-prix').value       = '0';
+  document.getElementById('f-status').value     = 'new';
+  document.getElementById('f-dateE').value      = '';
+  document.getElementById('f-dateR').value      = '';
   document.getElementById('f-nbRelances').value = '0';
   document.getElementById('modal').classList.add('open');
 }
@@ -469,18 +454,17 @@ function openEditModal(id) {
   currentId = id;
   const c = clients.find(x => x.id === id);
   if (!c) return;
-
-  document.getElementById('modal-title').textContent   = c.entreprise;
-  document.getElementById('f-entreprise').value        = c.entreprise  || '';
-  document.getElementById('f-contact').value           = c.contact     || '';
-  document.getElementById('f-email').value             = c.email       || '';
-  document.getElementById('f-tel').value               = c.tel         || '';
-  document.getElementById('f-prix').value              = c.prix        || 0;
-  document.getElementById('f-status').value            = c.status      || 'new';
-  document.getElementById('f-dateE').value             = c.dateE       || '';
-  document.getElementById('f-dateR').value             = c.dateR       || '';
-  document.getElementById('f-nbRelances').value        = c.nbRelances  || 0;
-  document.getElementById('f-infos').value             = c.infos       || '';
+  document.getElementById('modal-title').textContent    = c.entreprise;
+  document.getElementById('f-entreprise').value         = c.entreprise  || '';
+  document.getElementById('f-contact').value            = c.contact     || '';
+  document.getElementById('f-email').value              = c.email       || '';
+  document.getElementById('f-tel').value                = c.tel         || '';
+  document.getElementById('f-prix').value               = c.prix        || 0;
+  document.getElementById('f-status').value             = c.status      || 'new';
+  document.getElementById('f-dateE').value              = c.dateE       || '';
+  document.getElementById('f-dateR').value              = c.dateR       || '';
+  document.getElementById('f-nbRelances').value         = c.nbRelances  || 0;
+  document.getElementById('f-infos').value              = c.infos       || '';
   document.getElementById('modal').classList.add('open');
 }
 
@@ -490,18 +474,18 @@ function closeModal() {
 
 async function saveClient() {
   const entreprise = document.getElementById('f-entreprise').value.trim();
-  if (!entreprise) { toast('Entreprise requise', 'error'); return; }
+  if (!entreprise) { toast('Le champ Entreprise est requis', 'error'); return; }
 
   const data = {
     entreprise,
     contact:    document.getElementById('f-contact').value,
     email:      document.getElementById('f-email').value,
     tel:        document.getElementById('f-tel').value,
-    prix:       parseFloat(document.getElementById('f-prix').value)      || 0,
+    prix:       parseFloat(document.getElementById('f-prix').value)     || 0,
     status:     document.getElementById('f-status').value,
-    dateE:      document.getElementById('f-dateE').value                 || null,
-    dateR:      document.getElementById('f-dateR').value                 || null,
-    nbRelances: parseInt(document.getElementById('f-nbRelances').value)  || 0,
+    dateE:      document.getElementById('f-dateE').value                || null,
+    dateR:      document.getElementById('f-dateR').value                || null,
+    nbRelances: parseInt(document.getElementById('f-nbRelances').value) || 0,
     infos:      document.getElementById('f-infos').value
   };
 
@@ -514,19 +498,19 @@ async function saveClient() {
   }
 
   if (!error) {
-    toast(currentId ? 'Dossier mis à jour' : 'Dossier créé', 'success');
+    toast(currentId ? 'Dossier mis à jour' : 'Dossier créé avec succès', 'success');
     closeModal();
     loadData();
   } else {
-    toast('Erreur enregistrement', 'error');
+    console.error('Save error:', error);
+    toast('Erreur : ' + (error.message || 'inconnue'), 'error');
   }
 }
 
 async function deleteClient() {
   if (!currentId) return;
   const c = clients.find(x => x.id === currentId);
-  if (!confirm(`Supprimer "${c?.entreprise}" ?`)) return;
-
+  if (!confirm(`Supprimer le dossier "${c?.entreprise}" ? Cette action est irréversible.`)) return;
   const { error } = await _sb.from('clients').delete().eq('id', currentId);
   if (!error) {
     toast('Dossier supprimé', 'info');
@@ -538,43 +522,121 @@ async function deleteClient() {
 }
 
 // ==========================================
-// CSV IMPORT
+// CSV IMPORT — robuste
 // ==========================================
 function handleCSV(event) {
   const file = event.target.files[0];
+  // Réinitialiser l'input pour pouvoir réimporter le même fichier
+  event.target.value = '';
   if (!file) return;
 
   const reader = new FileReader();
   reader.onload = async (e) => {
-    const lines   = e.target.result.split('\n').filter(l => l.trim());
-    const headers = lines[0].split(';').map(h => h.trim().toLowerCase());
-    let imported  = 0;
+    const raw = e.target.result;
 
+    // Nettoyer les fins de ligne Windows (\r)
+    const lines = raw.replace(/\r/g, '').split('\n').filter(l => l.trim());
+
+    if (lines.length < 2) {
+      toast('Le fichier CSV est vide ou mal formaté', 'error');
+      return;
+    }
+
+    // Détecter le séparateur automatiquement : ; ou ,
+    const firstLine = lines[0];
+    const sep = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+
+    const headers = firstLine.split(sep).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+    // Construire les lignes de données
+    const rows = [];
     for (let i = 1; i < lines.length; i++) {
-      const vals = lines[i].split(';');
+      const vals = lines[i].split(sep);
       const row  = {};
-      headers.forEach((h, idx) => row[h] = (vals[idx] || '').trim());
-      if (!row.entreprise) continue;
-
-      await _sb.from('clients').insert([{
-        entreprise: row.entreprise,
-        contact:    row.contact    || '',
-        email:      row.email      || '',
-        tel:        row.tel        || row.telephone || '',
-        prix:       parseFloat(row.prix) || 0,
+      headers.forEach((h, idx) => { row[h] = (vals[idx] || '').trim().replace(/^"|"$/g, ''); });
+      // Accepter "entreprise" ou "company" ou "societe" ou "nom"
+      const name = row.entreprise || row.company || row.societe || row.nom || row.name || '';
+      if (!name) continue;
+      rows.push({
+        entreprise: name,
+        contact:    row.contact    || row.nom    || '',
+        email:      row.email      || row.mail   || '',
+        tel:        row.tel        || row.telephone || row.phone || '',
+        prix:       parseFloat((row.prix || row.price || '0').replace(',', '.')) || 0,
         status:     row.status     || 'new',
-        dateE:      row.datee      || row['date evenement'] || null,
-        dateR:      row.dater      || row['date relance']   || null,
-        infos:      row.infos      || row.notes             || '',
+        dateE:      parseDate(row.datee || row.date || row.dateevenement || ''),
+        dateR:      parseDate(row.dater || row.daterelance || ''),
+        infos:      row.infos      || row.notes  || row.commentaires || '',
         nbRelances: 0,
         dateC:      TODAY
-      }]);
-      imported++;
+      });
     }
-    toast(`${imported} dossier${imported > 1 ? 's' : ''} importé${imported > 1 ? 's' : ''}`, 'success');
+
+    if (rows.length === 0) {
+      toast('Aucune ligne valide trouvée dans le CSV', 'error');
+      return;
+    }
+
+    showImportLoader(`Import de ${rows.length} dossier${rows.length > 1 ? 's' : ''}…`);
+
+    // Insérer par batch de 50
+    const BATCH = 50;
+    let imported = 0;
+    let errors   = 0;
+
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH);
+      const { error } = await _sb.from('clients').insert(batch);
+      if (error) {
+        console.error('Batch insert error:', error);
+        errors += batch.length;
+      } else {
+        imported += batch.length;
+      }
+      showImportLoader(`Import… ${Math.min(i + BATCH, rows.length)} / ${rows.length}`);
+    }
+
+    hideImportLoader();
+
+    if (errors > 0 && imported === 0) {
+      toast(`Échec de l'import : vérifiez le format du fichier`, 'error');
+    } else if (errors > 0) {
+      toast(`${imported} importé${imported > 1 ? 's' : ''}, ${errors} erreur${errors > 1 ? 's' : ''}`, 'info');
+    } else {
+      toast(`${imported} dossier${imported > 1 ? 's importés' : ' importé'} avec succès`, 'success');
+    }
+
     loadData();
   };
-  reader.readAsText(file);
+
+  reader.onerror = () => {
+    toast('Impossible de lire le fichier', 'error');
+  };
+
+  reader.readAsText(file, 'UTF-8');
+}
+
+// Tenter de parser une date en format JJ/MM/AAAA ou AAAA-MM-JJ
+function parseDate(str) {
+  if (!str) return null;
+  str = str.trim();
+  // Format ISO AAAA-MM-JJ
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  // Format JJ/MM/AAAA ou JJ-MM-AAAA
+  const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null;
+}
+
+// ==========================================
+// XSS PROTECTION
+// ==========================================
+function escHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ==========================================
@@ -592,7 +654,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Fermer notif panel en cliquant ailleurs
 document.addEventListener('click', e => {
   const panel = document.getElementById('notif-panel');
   if (!panel.contains(e.target) && !document.getElementById('notif-btn').contains(e.target)) {
@@ -600,7 +661,6 @@ document.addEventListener('click', e => {
   }
 });
 
-// Fermer modales en cliquant sur le backdrop
 document.getElementById('modal').addEventListener('click', e => {
   if (e.target === document.getElementById('modal')) closeModal();
 });
