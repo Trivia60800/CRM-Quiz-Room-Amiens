@@ -53,27 +53,57 @@ const STATUSES = ['new', 'progress', 'urgent', 'won', 'lost'];
  */
 function computeNextRelance(client) {
   const dateC = client.dateC || TODAY;
-  const n     = client.nbRelances || 0;
+  const dateE = client.dateE || null;
+  const n     = client.nbRelances || 0; // nombre de relances déjà faites
 
+  const today   = new Date(TODAY);
   const created = new Date(dateC);
 
-  // Jalons fixes depuis la date de création : J+3, J+7, J+14, J+30
-  const jalons = [3, 7, 14, 30];
-  for (let i = 0; i < jalons.length; i++) {
+  // ---- MODE REBOURS (événement dans < 30j) ----
+  if (dateE) {
+    const event    = new Date(dateE + 'T12:00:00');
+    const daysToEvent = Math.ceil((event - today) / 86400000);
+    const MIN_BEFORE = 3; // jamais dans les 3j précédant l'événement
+
+    if (daysToEvent <= 30 && daysToEvent > MIN_BEFORE) {
+      // Jalons à rebours : J-21, J-14, J-7, J-3
+      const rebroussJalons = [21, 14, 7, 3];
+      for (let j of rebroussJalons) {
+        if (j <= MIN_BEFORE) break;
+        const jalDate = new Date(dateE + 'T12:00:00');
+        jalDate.setDate(jalDate.getDate() - j);
+        const jalStr = jalDate.toISOString().split('T')[0];
+        if (jalStr > TODAY) return jalStr; // premier jalon futur
+      }
+      // Tous les jalons sont passés et on est encore à > 3j → pas de relance avant l'événement
+      return null;
+    }
+
+    // Événement déjà passé ou > 30j → mode création
+  }
+
+  // ---- MODE CRÉATION (événement lointain ou absent) ----
+  const jalonsCreation = [3, 7, 14, 30];
+  for (let i = 0; i < jalonsCreation.length; i++) {
     if (i >= n) {
       const target = new Date(created);
-      target.setDate(target.getDate() + jalons[i]);
+      target.setDate(target.getDate() + jalonsCreation[i]);
       const targetStr = target.toISOString().split('T')[0];
       if (targetStr > TODAY) return targetStr;
     }
   }
-
-  // Au-delà de J+30 : relance mensuelle (+30j à chaque fois)
+  // Au-delà de J+30 : relance mensuelle
   const monthlyBase = new Date(created);
   monthlyBase.setDate(monthlyBase.getDate() + 30);
-  const extraMonths = n - jalons.length + 1;
+  const extraMonths = n - jalonsCreation.length + 1;
   if (extraMonths > 0) {
     monthlyBase.setMonth(monthlyBase.getMonth() + extraMonths);
+  }
+  // Vérifier que la prochaine mensuelle ne tombe pas trop proche de l'événement
+  if (dateE) {
+    const event = new Date(dateE + 'T12:00:00');
+    const diff  = Math.ceil((event - monthlyBase) / 86400000);
+    if (diff <= 3) return null; // trop proche de l'événement
   }
   const monthlyStr = monthlyBase.toISOString().split('T')[0];
   return monthlyStr > TODAY ? monthlyStr : null;
@@ -179,6 +209,19 @@ async function loadData() {
 
   if (!error && data) {
     clients = data;
+
+    // Nettoyage : effacer les dateR résiduelles sur won/lost
+    const staleIds = data
+      .filter(c => (c.status === 'won' || c.status === 'lost') && c.dateR)
+      .map(c => c.id);
+    if (staleIds.length > 0) {
+      await _sb.from('clients').update({ dateR: null }).in('id', staleIds);
+      staleIds.forEach(id => {
+        const c = clients.find(x => x.id === id);
+        if (c) c.dateR = null;
+      });
+    }
+
     checkEventsPassed();
     refreshUI();
     updateNotifications();
@@ -386,48 +429,42 @@ function renderKanban() {
       card.setAttribute('data-id', c.id);
 
       const isUrgent = status === 'urgent';
-      const lbl      = relanceLabel(c);
+      const isClosed = (status === 'won' || status === 'lost');
+      const lbl      = (!isClosed) ? relanceLabel(c) : null;
 
-      // Badge de priorité pour "À relancer"
+      // Badge priorité (À relancer uniquement)
       let priorityBadge = '';
       if (isUrgent) {
         const rank = idx + 1;
         priorityBadge = `<span class="priority-rank">#${rank}</span>`;
       }
 
-      // Countdown pour "En cours"
+      // Countdown (En cours uniquement)
       let countdownHtml = '';
       if (status === 'progress' && c.dateR) {
         const diff = daysDiff(c.dateR);
         if (diff !== null) {
-          const cls  = diff <= 0 ? 'countdown-overdue' : diff <= 3 ? 'countdown-soon' : 'countdown-ok';
-          const txt  = diff < 0 ? `Retard ${Math.abs(diff)}j` : diff === 0 ? "Aujourd'hui !" : `Dans ${diff} jour${diff > 1 ? 's' : ''}`;
+          const cls = diff <= 0 ? 'countdown-overdue' : diff <= 3 ? 'countdown-soon' : 'countdown-ok';
+          const txt = diff < 0 ? `Retard ${Math.abs(diff)}j` : diff === 0 ? "Aujourd'hui !" : `Dans ${diff} jour${diff > 1 ? 's' : ''}`;
           countdownHtml = `<div class="card-countdown ${cls}"><i class="fa-solid fa-clock"></i> ${txt}</div>`;
         }
       }
 
-      // Date événement
+      // Date événement — masquée sur won/lost sauf date simple
       let eventHtml = '';
-      if (c.dateE) {
+      if (c.dateE && !isClosed) {
         const dEvent = daysDiff(c.dateE);
         const eventCls = dEvent !== null && dEvent <= 7 && dEvent >= 0 ? 'event-near' : dEvent !== null && dEvent < 0 ? 'event-past' : '';
         const eventTxt = dEvent !== null && dEvent < 0 ? `Événement passé (${fmtDate(c.dateE)})` : `Événement : ${fmtDate(c.dateE)}`;
         if (eventCls || isUrgent) {
           eventHtml = `<div class="card-event ${eventCls}"><i class="fa-solid fa-calendar-star" style="font-size:9px"></i> ${eventTxt}</div>`;
         }
+      } else if (c.dateE && isClosed) {
+        eventHtml = `<div class="card-event" style="color:var(--muted)"><i class="fa-regular fa-calendar" style="font-size:9px"></i> ${fmtDate(c.dateE)}</div>`;
       }
 
-      card.innerHTML = `
-        <div class="card-top">
-          <span class="card-company">${escHtml(c.entreprise)}</span>
-          <div style="display:flex;align-items:center;gap:6px">
-            ${priorityBadge}
-            <span class="card-price">${fmt(c.prix)}</span>
-          </div>
-        </div>
-        <div class="card-contact">${escHtml(c.contact || 'N/C')}</div>
-        ${countdownHtml}
-        ${eventHtml}
+      // Métadonnées et boutons — absents pour won/lost
+      const metaHtml = isClosed ? '' : `
         <div class="card-meta">
           <span class="relance-badge">
             <i class="fa-solid fa-rotate-right" style="font-size:8px"></i>
@@ -442,7 +479,20 @@ function renderKanban() {
           <button class="card-btn relance" onclick="openRelanceModal(${c.id}, event)">
             <i class="fa-solid fa-phone" style="font-size:9px"></i> Relancé
           </button>
+        </div>`;
+
+      card.innerHTML = `
+        <div class="card-top">
+          <span class="card-company">${escHtml(c.entreprise)}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${priorityBadge}
+            <span class="card-price">${fmt(c.prix)}</span>
+          </div>
         </div>
+        <div class="card-contact">${escHtml(c.contact || 'N/C')}</div>
+        ${countdownHtml}
+        ${eventHtml}
+        ${metaHtml}
       `;
       card.onclick = () => openEditModal(c.id);
       container.appendChild(card);
@@ -861,54 +911,8 @@ async function deleteClient() {
 }
 
 // ==========================================
-// IMPORT CSV — VERSION ROBUSTE CORRIGÉE
+// CSV IMPORT
 // ==========================================
-
-/**
- * Parse une ligne CSV en tenant compte des guillemets (champs avec virgules/points-virgules)
- * Gère les valeurs comme "636,50€" ou "Mail, Téléphone"
- */
-function parseCSVLine(line, sep) {
-  const vals = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      // Guillemet double à l'intérieur d'un champ entre guillemets → on l'inclut
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === sep && !inQuotes) {
-      vals.push(cur);
-      cur = '';
-    } else {
-      cur += ch;
-    }
-  }
-  vals.push(cur);
-  return vals;
-}
-
-/**
- * Normalise un header CSV :
- * - minuscules
- * - supprime les accents
- * - supprime les apostrophes (gère "Date de l'événement" → "date de levenement")
- * - trim les espaces
- */
-function normalizeHeader(h) {
-  return h
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')   // supprime les accents
-    .replace(/['''\u2018\u2019\u02bc]/g, ''); // supprime toutes les formes d'apostrophes
-}
-
 function handleCSV(event) {
   const file = event.target.files[0];
   event.target.value = '';
@@ -916,113 +920,149 @@ function handleCSV(event) {
 
   const reader = new FileReader();
   reader.onload = async (e) => {
-    let raw = e.target.result;
+    const raw   = e.target.result;
+    const lines = raw.replace(/\r/g, '').split('\n').filter(l => l.trim());
 
-    // Enlever le BOM UTF-8 si présent et nettoyer
-    raw = raw.replace(/^\uFEFF/, '').trim();
-    const lines = raw.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) { toast('Fichier CSV vide ou mal formaté', 'error'); return; }
 
-    if (lines.length < 2) {
-      toast('Le fichier semble vide', 'error');
-      return;
-    }
-
-    // Détection automatique du séparateur (virgule ou point-virgule)
     const firstLine = lines[0];
-    const sep = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
-
-    // Normalisation des headers (minuscules, sans accents, sans apostrophes)
-    const rawHeaders = parseCSVLine(firstLine, sep);
-    const headers = rawHeaders.map(h => normalizeHeader(h));
-
-    console.log('[CSV Import] Séparateur détecté :', sep);
-    console.log('[CSV Import] Headers normalisés :', headers);
+    const sep = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+    const headers = firstLine.split(sep).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
-      const vals = parseCSVLine(lines[i], sep);
-
-      const row = {};
-      headers.forEach((h, idx) => {
-        row[h] = (vals[idx] || '').trim();
-      });
-
-      // Mapping des colonnes du fichier vers les champs Supabase
-      // On couvre plusieurs noms possibles pour chaque champ
-      const entreprise =
-        row['entreprise'] ||
-        row['nom de lentreprise'] ||
-        row['societe'] ||
-        vals[0] || '';
-
-      if (!entreprise || entreprise.toLowerCase() === 'entreprise') continue;
-
-      // Nettoyage du prix : enlève €, espaces normaux et insécables (\u00a0), remplace , par .
-      const prixRaw = row['prix du devis'] || row['prix'] || '0';
-      const prix = parseFloat(
-        prixRaw
-          .replace(/[^\d.,]/g, '')   // garde uniquement chiffres, virgule, point
-          .replace(',', '.')          // virgule décimale → point
-      ) || 0;
-
-      // Détermination du statut
-      const statutRaw = (row['statut'] || '').toLowerCase();
-      let status = 'new';
-      if (statutRaw.includes('annul') || statutRaw.includes('perdu')) status = 'lost';
-      else if (statutRaw.includes('won') || statutRaw.includes('gagne') || statutRaw.includes('gagn')) status = 'won';
-
+      const vals = lines[i].split(sep);
+      const row  = {};
+      headers.forEach((h, idx) => { row[h] = (vals[idx] || '').trim().replace(/^"|"$/g, ''); });
+      const name = row.entreprise || row.company || row.societe || row.nom || row.name || '';
+      if (!name) continue;
       const rowData = {
-        entreprise: entreprise,
-        contact:    row['contact']    || row['nom du contact'] || '',
-        email:      row['email']      || '',
-        tel:        row['telephone']  || row['tel'] || '',
-        prix:       prix,
-        status:     status,
-        dateE:      parseDate(row['date de levenement'] || row['date evenement'] || row['datee'] || ''),
-        dateR:      parseDate(row['date de relance']    || row['dater'] || ''),
-        infos:      row['infos +']    || row['infos']   || row['reponse relance'] || '',
+        entreprise: name,
+        contact:    row.contact    || '',
+        email:      row.email      || row.mail  || '',
+        tel:        row.tel        || row.telephone || row.phone || '',
+        prix:       parseFloat((row.prix || row.price || '0').replace(',', '.')) || 0,
+        status:     row.status     || 'new',
+        dateE:      parseDate(row.datee || row.date || row.dateevenement || ''),
+        dateR:      parseDate(row.dater || row.daterelance || ''),
+        infos:      row.infos      || row.notes || row.commentaires || '',
         nbRelances: 0,
         dateC:      TODAY
       };
-
+      // Calculer première relance si pas de dateR dans le CSV
+      if (!rowData.dateR) {
+        rowData.dateR = computeNextRelance(rowData);
+      }
       rows.push(rowData);
     }
 
-    console.log('[CSV Import] Lignes valides :', rows.length);
+    if (rows.length === 0) { toast('Aucune ligne valide dans le CSV', 'error'); return; }
 
-    if (rows.length === 0) {
-      toast('Aucune donnée valide trouvée dans le fichier', 'error');
-      return;
+    showImportLoader(`Import de ${rows.length} dossier${rows.length > 1 ? 's' : ''}…`);
+
+    const BATCH = 50;
+    let imported = 0, errors = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH);
+      const { error } = await _sb.from('clients').insert(batch);
+      if (error) { console.error('Batch error:', error); errors += batch.length; }
+      else        { imported += batch.length; }
+      showImportLoader(`Import… ${Math.min(i + BATCH, rows.length)} / ${rows.length}`);
     }
-
-    showImportLoader(`Import de ${rows.length} dossier(s)…`);
-
-    const { error } = await _sb.from('clients').insert(rows);
 
     hideImportLoader();
-    if (error) {
-      console.error('[CSV Import] Erreur Supabase :', error);
-      toast('Erreur Supabase : ' + error.message, 'error');
-    } else {
-      toast(`${rows.length} dossier${rows.length > 1 ? 's' : ''} importé${rows.length > 1 ? 's' : ''} avec succès !`, 'success');
-      loadData();
-    }
+    if (errors > 0 && imported === 0) toast(`Échec de l'import — vérifiez le format`, 'error');
+    else if (errors > 0)              toast(`${imported} importé${imported > 1 ? 's' : ''}, ${errors} erreur(s)`, 'info');
+    else                              toast(`${imported} dossier${imported > 1 ? 's importés' : ' importé'} !`, 'success');
+    loadData();
   };
+  reader.onerror = () => toast('Impossible de lire le fichier', 'error');
   reader.readAsText(file, 'UTF-8');
 }
 
-/**
- * Parse une date depuis une chaîne :
- * - Format ISO  : AAAA-MM-JJ
- * - Format FR   : JJ/MM/AAAA ou JJ-MM-AAAA
- */
 function parseDate(str) {
   if (!str) return null;
   str = str.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
   const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
   return null;
+}
+
+// ==========================================
+// EXPORT CSV
+// ==========================================
+function exportCSV() {
+  if (clients.length === 0) {
+    toast('Aucun dossier à exporter', 'info');
+    return;
+  }
+
+  // En-têtes — noms explicites pour compatibilité avec d'autres CRM
+  const headers = [
+    'entreprise',
+    'contact',
+    'email',
+    'tel',
+    'prix',
+    'status',
+    'date_creation',
+    'date_evenement',
+    'date_relance',
+    'nb_relances',
+    'infos'
+  ];
+
+  // Traduction des statuts en français pour lisibilité dans l'export
+  const statusFr = {
+    new:      'Nouveau',
+    progress: 'En cours',
+    urgent:   'À relancer',
+    won:      'Gagné',
+    lost:     'Perdu'
+  };
+
+  // Échapper une valeur pour CSV : entourer de guillemets si elle contient
+  // un séparateur, un guillemet ou un saut de ligne
+  function csvCell(val) {
+    const str = (val === null || val === undefined) ? '' : String(val);
+    // Toujours entourer de guillemets pour sécuriser les notes multi-lignes
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+
+  const rows = [
+    headers.join(';'), // ligne d'en-tête
+    ...clients.map(c => [
+      csvCell(c.entreprise),
+      csvCell(c.contact),
+      csvCell(c.email),
+      csvCell(c.tel),
+      csvCell(c.prix || 0),
+      csvCell(statusFr[c.status] || c.status),
+      csvCell(c.dateC  || ''),
+      csvCell(c.dateE  || ''),
+      csvCell(c.dateR  || ''),
+      csvCell(c.nbRelances || 0),
+      csvCell(c.infos  || '')
+    ].join(';'))
+  ];
+
+  // BOM UTF-8 pour que Excel l'ouvre correctement avec les accents
+  const bom     = '\uFEFF';
+  const content = bom + rows.join('\r\n');
+  const blob    = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url     = URL.createObjectURL(blob);
+
+  const today   = new Date().toISOString().split('T')[0];
+  const a       = document.createElement('a');
+  a.href        = url;
+  a.download    = `crm-quiz-room-amiens_${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  toast(`${clients.length} dossier${clients.length > 1 ? 's exportés' : ' exporté'} en CSV`, 'success');
 }
 
 // ==========================================
